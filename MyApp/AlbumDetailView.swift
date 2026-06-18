@@ -52,7 +52,7 @@ struct AlbumDetailView: View {
                 }
             }
 
-            Color.clear.frame(height: DS.bottomClearance)
+            Color.clear.miniBarClearance()
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
         }

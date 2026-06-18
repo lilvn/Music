@@ -174,7 +174,7 @@ struct PlaylistDetailView: View {
                 .onDelete { offsets in offsets.map { tracks[$0] }.forEach(remove) }
             }
 
-            Color.clear.frame(height: DS.bottomClearance)
+            Color.clear.miniBarClearance()
                 .listRowSeparator(.hidden).listRowBackground(Color.clear)
         }
         .listStyle(.plain)

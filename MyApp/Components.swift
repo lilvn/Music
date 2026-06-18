@@ -41,10 +41,9 @@ func destinationView(for route: LibraryRoute) -> some View {
     }
 }
 
-// MARK: - Card-open navigation (detail opens as a standard sheet — slides up, swipes down to close)
+// MARK: - Card-open navigation (detail PUSHES within the tab so the chrome stays above it)
 
 struct OpenDetailAction {
-    let open: (LibraryRoute) -> Void
     let namespace: Namespace.ID
 }
 
@@ -62,15 +61,18 @@ extension EnvironmentValues {
 /// Install once per screen that shows cards. Provides `openDetail` and presents the zoom cover that
 /// scales out of the tapped card; the native zoom dismiss (drag down to shrink back) closes it.
 private struct CardNavigation: ViewModifier {
-    @State private var route: LibraryRoute?
     @Namespace private var ns
 
     func body(content: Content) -> some View {
         content
-            .environment(\.openDetail, OpenDetailAction(open: { route = $0 }, namespace: ns))
-            .fullScreenCover(item: $route) { r in
-                DetailHost(route: r)
-                    .navigationTransition(.zoom(sourceID: r.id, in: ns))
+            .environment(\.openDetail, OpenDetailAction(namespace: ns))
+            // Push details onto the tab's own NavigationStack (instead of a full-screen cover) so
+            // the bottom chrome — nav bar + mini player — stays ABOVE them; only Now Playing covers
+            // the whole screen. The zoom card-expand still animates the push, and the same handler
+            // serves nested pushes (an album opened from inside an artist).
+            .navigationDestination(for: LibraryRoute.self) { route in
+                destinationView(for: route)
+                    .navigationTransition(.zoom(sourceID: route.id, in: ns))
             }
     }
 }
@@ -79,24 +81,14 @@ extension View {
     func cardNavigation() -> some View { modifier(CardNavigation()) }
 }
 
-/// Hosts a detail inside the sheet and re-installs `cardNavigation()` so nested cards (albums
-/// inside an artist) open their own sheets.
-struct DetailHost: View {
-    let route: LibraryRoute
-    var body: some View {
-        destinationView(for: route)
-            .cardNavigation()
-    }
-}
-
-/// A tappable card that zooms `route` into a full-screen cover via the ambient `openDetail` action.
+/// A tappable card that pushes `route` (zoom card-expand) via the ambient `openDetail` namespace.
 struct NavCard<Label: View>: View {
     let route: LibraryRoute
     @ViewBuilder var label: () -> Label
     @Environment(\.openDetail) private var action
 
     var body: some View {
-        Button { action?.open(route) } label: { label() }
+        NavigationLink(value: route) { label() }
             .buttonStyle(ScaleButtonStyle())
             .modifier(OptionalMatchedSource(id: route.id, ns: action?.namespace))
     }
@@ -562,7 +554,7 @@ struct ArtistDetailView: View {
                     .padding(.top, 16)
                 }
 
-                Color.clear.frame(height: DS.bottomClearance)
+                Color.clear.miniBarClearance()
             }
         }
         .scrollIndicators(.hidden)
