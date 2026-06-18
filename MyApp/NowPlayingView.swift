@@ -7,6 +7,7 @@ struct NowPlayingView: View {
     @EnvironmentObject var api: JellyfinAPI
     @State private var showQueue = false
     @State private var showLyrics = false
+    @State private var detailRoute: LibraryRoute?
     @Namespace private var sheetZoom
 
     private var seed: Int {
@@ -49,6 +50,20 @@ struct NowPlayingView: View {
                 .background { Color(.systemBackground).ignoresSafeArea() }
                 .navigationTransition(.zoom(sourceID: "lyrics", in: sheetZoom))
         }
+        .fullScreenCover(item: $detailRoute) { route in
+            NavigationStack {
+                destinationView(for: route)
+                    .cardNavigation()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button { detailRoute = nil } label: {
+                                Image(systemName: "chevron.down").fontWeight(.semibold)
+                            }
+                            .tint(.primary)
+                        }
+                    }
+            }
+        }
     }
 
     private var albumArt: some View {
@@ -74,17 +89,38 @@ struct NowPlayingView: View {
     }
 
     private var trackInfo: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(player.currentItem?.name ?? "Not Playing")
-                .font(.title2).fontWeight(.bold)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-            Text(player.currentItem?.primaryArtist ?? "")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+        Menu {
+            if player.currentItem?.albumId != nil {
+                Button { goToAlbum() } label: { Label("Go to Album", systemImage: "square.stack") }
+            }
+            if player.currentItem?.artistItems?.first != nil {
+                Button { goToArtist() } label: { Label("Go to Artist", systemImage: "music.mic") }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(player.currentItem?.name ?? "Not Playing")
+                    .font(.title2).fontWeight(.bold)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(player.currentItem?.primaryArtist ?? "")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .tint(.primary)
+    }
+
+    private func goToAlbum() {
+        guard let id = player.currentItem?.albumId else { return }
+        Task { if let item = try? await api.fetchItem(id: id) { detailRoute = .album(item) } }
+    }
+
+    private func goToArtist() {
+        guard let id = player.currentItem?.artistItems?.first?.id else { return }
+        Task { if let item = try? await api.fetchItem(id: id) { detailRoute = .artist(item) } }
     }
 
     private var mainControls: some View {

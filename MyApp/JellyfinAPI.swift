@@ -44,7 +44,7 @@ class JellyfinAPI: ObservableObject {
         ])
     }
 
-    func fetchAlbums(artistId: String? = nil, limit: Int = 300) async throws -> [MediaItem] {
+    func fetchAlbums(artistId: String? = nil, genreId: String? = nil, limit: Int = 300) async throws -> [MediaItem] {
         var items: [URLQueryItem] = [
             q("IncludeItemTypes", "MusicAlbum"),
             q("Recursive", "true"),
@@ -56,7 +56,17 @@ class JellyfinAPI: ObservableObject {
             q("EnableImageTypes", "Primary"),
         ]
         if let id = artistId { items.append(q("AlbumArtistIds", id)) }
+        if let gid = genreId { items.append(q("GenreIds", gid)) }
         return try await fetchItems(path: "Users/\(userId)/Items", query: items)
+    }
+
+    /// Music genres in the library (for the Albums genre filter).
+    func fetchMusicGenres() async throws -> [MediaItem] {
+        try await fetchItems(path: "MusicGenres", query: [
+            q("UserId", userId),
+            q("SortBy", "SortName"),
+            q("Limit", "100"),
+        ])
     }
 
     func fetchArtists(limit: Int = 200) async throws -> [MediaItem] {
