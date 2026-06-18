@@ -273,6 +273,49 @@ struct SpinningDisc: View {
     }
 }
 
+// MARK: - Bottom chrome clearance
+
+/// Extra bottom padding so a scroll view's last items clear the floating bottom chrome. The bottom
+/// safe-area inset reserves the tab/search bar, but the mini player animates in on top and isn't
+/// reliably reserved — so add its height back whenever something is playing.
+struct MiniBarClearance: ViewModifier {
+    @EnvironmentObject var player: AudioPlayerManager
+    func body(content: Content) -> some View {
+        content.padding(.bottom, player.currentItem != nil ? 132 : 66)
+    }
+}
+
+extension View {
+    func miniBarClearance() -> some View { modifier(MiniBarClearance()) }
+}
+
+// MARK: - Queue action button (round secondary action beside the Play pill)
+
+/// Flat round button used on detail pages for "play next" / "add to queue", flanking the Play pill.
+struct QueueActionButton: View {
+    let icon: String
+    var disabled: Bool = false
+    let action: () -> Void
+    @State private var bump = false
+
+    var body: some View {
+        Button {
+            action()
+            bump.toggle()
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 52, height: 52)
+                .background(Color(.secondarySystemBackground), in: .circle)
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .disabled(disabled)
+        .opacity(disabled ? 0.4 : 1)
+        .sensoryFeedback(.impact(weight: .light), trigger: bump)
+    }
+}
+
 // MARK: - Scale Press Button Style
 
 struct ScaleButtonStyle: ButtonStyle {
@@ -383,6 +426,9 @@ struct ArtistRow: View {
 struct SongRow: View {
     let song: MediaItem
     var showAlbumArt: Bool = false
+    /// Explicit number for the leading column (album detail), so singles with no `IndexNumber`
+    /// still show a number and match multi-track albums. Falls back to the item's own index.
+    var trackNumber: Int? = nil
     let onTap: () -> Void
     var onPlayNext: (() -> Void)? = nil
     var onPlayLast: (() -> Void)? = nil
@@ -440,8 +486,8 @@ struct SongRow: View {
                         .font(.caption)
                         .symbolEffect(.variableColor.iterative.dimInactiveLayers,
                                       isActive: isCurrent && player.isPlaying)
-                } else if let idx = song.indexNumber {
-                    Text("\(idx)")
+                } else if let num = trackNumber ?? song.indexNumber {
+                    Text("\(num)")
                         .font(.footnote)
                         .monospacedDigit()
                         .foregroundStyle(.tertiary)
@@ -497,6 +543,7 @@ struct ArtistDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 heroHeader
+                    .killScrollBounce()
 
                 if isLoading {
                     ProgressView().padding(48)
@@ -518,6 +565,7 @@ struct ArtistDetailView: View {
                 Color.clear.frame(height: DS.bottomClearance)
             }
         }
+        .scrollIndicators(.hidden)
         .ignoresSafeArea(edges: .top)
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -561,5 +609,43 @@ struct ArtistDetailView: View {
             .padding(.horizontal, DS.hPad)
             .padding(.bottom, 20)
         }
+    }
+}
+
+// MARK: - Scroll bounce killer (for zoom-presented detail covers)
+
+/// Walks up to the nearest enclosing `UIScrollView` and turns OFF its vertical bounce. A
+/// zoom-presented (`.navigationTransition(.zoom)`) cover only converts a downward drag at the
+/// very top into the interactive shrink-back dismiss when the inner scroll view *doesn't* rubber
+/// band there — otherwise the over-scroll swallows the gesture. Disabling `bounces` hands that
+/// top-edge drag straight to the dismiss. Must live INSIDE the scrollable content (e.g. as a
+/// row/header background) so the scroll view is an ancestor.
+private struct ScrollBounceKiller: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let v = UIView(frame: .zero)
+        v.isUserInteractionEnabled = false
+        return v
+    }
+    func updateUIView(_ uiView: UIView, context: Context) {
+        DispatchQueue.main.async {
+            var view: UIView? = uiView.superview
+            while let v = view {
+                if let scroll = v as? UIScrollView {
+                    scroll.bounces = false
+                    scroll.alwaysBounceVertical = false
+                    break
+                }
+                view = v.superview
+            }
+        }
+    }
+}
+
+extension View {
+    /// Disables the enclosing scroll view's bounce so a top-edge downward drag becomes the zoom
+    /// interactive dismiss instead of a rubber-band over-scroll. Attach to content that is always
+    /// realized at the top of the scroll (a header), so it can reach the scroll view immediately.
+    func killScrollBounce() -> some View {
+        background(ScrollBounceKiller().frame(width: 0, height: 0))
     }
 }

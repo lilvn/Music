@@ -20,9 +20,11 @@ struct PlaylistsView: View {
                         Button { newName = ""; showCreate = true } label: {
                             Image(systemName: "plus")
                                 .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(.primary)
                                 .frame(width: 38, height: 38)
-                                .glassEffect(.regular, in: .circle)
+                                .background(Color(.secondarySystemBackground), in: .circle)
                         }
+                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, DS.gridPad)
                     .padding(.top, 4)
@@ -53,14 +55,13 @@ struct PlaylistsView: View {
                         }
                         .padding(.horizontal, DS.gridPad)
                         .padding(.top, 4)
-                        .padding(.bottom, DS.bottomClearance)
+                        .miniBarClearance()
                     }
                 }
             }
             .topEdgeFade()
             .toolbar(.hidden, for: .navigationBar)
             .cardNavigation()
-            .refreshable { await load(force: true) }
             .alert("New Playlist", isPresented: $showCreate) {
                 TextField("Name", text: $newName)
                 Button("Create") {
@@ -139,6 +140,7 @@ struct PlaylistDetailView: View {
         List {
             Section {
                 header
+                    .killScrollBounce()
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
@@ -176,11 +178,8 @@ struct PlaylistDetailView: View {
                 .listRowSeparator(.hidden).listRowBackground(Color.clear)
         }
         .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background { ArtworkBackground(url: api.artworkURL(for: playlist, size: 600)) }
-        .environment(\.colorScheme, .dark)
+        .scrollIndicators(.hidden)
         .environment(\.editMode, $editMode)
-        .toolbarColorScheme(.dark, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $pickerTrack) { PlaylistPickerSheet(track: $0) }
         .task { await reload() }
@@ -237,19 +236,27 @@ struct PlaylistDetailView: View {
                 }
             }
 
-            HStack(spacing: 14) {
+            HStack(spacing: 16) {
+                QueueActionButton(icon: "text.line.first.and.arrowtriangle.forward",
+                                  disabled: tracks.isEmpty) { player.playNext(tracks, api: api) }
                 playButton
-                if !tracks.isEmpty {
-                    Button {
-                        withAnimation { editMode = editMode.isEditing ? .inactive : .active }
-                    } label: {
-                        Label(editMode.isEditing ? "Done" : "Edit",
-                              systemImage: editMode.isEditing ? "checkmark" : "arrow.up.arrow.down")
-                            .font(.subheadline.weight(.medium))
-                            .padding(.horizontal, 18).padding(.vertical, 14)
-                    }
-                    .buttonStyle(.glass)
+                QueueActionButton(icon: "text.line.last.and.arrowtriangle.forward",
+                                  disabled: tracks.isEmpty) { player.playLast(tracks, api: api) }
+            }
+
+            if !tracks.isEmpty {
+                Button {
+                    withAnimation { editMode = editMode.isEditing ? .inactive : .active }
+                } label: {
+                    Label(editMode.isEditing ? "Done" : "Edit",
+                          systemImage: editMode.isEditing ? "checkmark" : "arrow.up.arrow.down")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 18).padding(.vertical, 10)
+                        .background(Color(.secondarySystemBackground), in: .capsule)
                 }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
             }
         }
         .frame(maxWidth: .infinity)
@@ -265,9 +272,11 @@ struct PlaylistDetailView: View {
         } label: {
             Label("Play", systemImage: "play.fill")
                 .font(.headline)
+                .foregroundStyle(Color(.systemBackground))
                 .padding(.horizontal, 36).padding(.vertical, 14)
+                .background(Color.primary, in: .capsule)
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.plain)
     }
 }
 
@@ -316,6 +325,7 @@ struct PlaylistPickerSheet: View {
                     }
                 }
             }
+            .scrollIndicators(.hidden)
             .navigationTitle("Add to Playlist")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

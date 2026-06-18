@@ -8,12 +8,15 @@ struct MiniPlayerBar: View {
     @State private var scrubStart: Double = 0
     @State private var dragProgress: Double = 0
     @State private var tick = 0
+    @State private var scrubWasPlaying = false
 
     private var progress: Double {
         player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0
     }
     private var displayProgress: Double { scrubbing ? dragProgress : progress }
-    private var shouldSpin: Bool { player.isPlaying && !scrubbing }
+    // Keep the disc turning *through* a scrub (if it was playing) instead of freezing the moment the
+    // user grabs the playhead — scrubbing pauses the audio, but stopping/restarting the spin looked buggy.
+    private var shouldSpin: Bool { player.isPlaying || (scrubbing && scrubWasPlaying) }
 
     var body: some View {
         GeometryReader { geo in
@@ -70,7 +73,7 @@ struct MiniPlayerBar: View {
                     .onChanged { value in
                         guard player.duration > 0 else { return }
                         if case .second(true, let drag) = value {
-                            if !scrubbing { scrubbing = true; scrubStart = progress; player.beginScrubbing() }
+                            if !scrubbing { scrubbing = true; scrubStart = progress; scrubWasPlaying = player.isPlaying; player.beginScrubbing() }
                             if let drag {
                                 dragProgress = min(max(scrubStart + drag.translation.width / geo.size.width, 0), 1)
                                 let t = Int(dragProgress * 40)
@@ -85,7 +88,11 @@ struct MiniPlayerBar: View {
             )
         }
         .frame(height: 52)
-        .glassEffect(.regular, in: .capsule)
+        .background {
+            Capsule(style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+                .shadow(color: .black.opacity(0.14), radius: 9, y: 2)
+        }
         .clipShape(.capsule)
         .scaleEffect(scrubbing ? 1.05 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: scrubbing)

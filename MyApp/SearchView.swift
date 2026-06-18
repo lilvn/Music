@@ -1,17 +1,17 @@
 import SwiftUI
 
-/// The Search tab. On iOS 26 the `.search`-role tab morphs the tab bar into a search field at
-/// the bottom (with the keyboard); results render here and tapping a card expands it into a sheet.
-struct SearchTabView: View {
+/// Content for the iOS 26 `.search`-role tab. The search field itself lives on the `TabView`
+/// (`.searchable`) and morphs the tab bar; this view just renders results for `query`.
+struct SearchResultsView: View {
+    let query: String
     @EnvironmentObject var api: JellyfinAPI
     @EnvironmentObject var player: AudioPlayerManager
 
-    @State private var query = ""
     @State private var results: [MediaItem] = []
     @State private var isSearching = false
-    @State private var searchTask: Task<Void, Never>?
     @State private var pickerTrack: MediaItem?
 
+    private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
     private var albums:  [MediaItem] { results.filter { $0.type == "MusicAlbum" } }
     private var artists: [MediaItem] { results.filter { $0.type == "MusicArtist" } }
     private var songs:   [MediaItem] { results.filter { $0.type == "Audio" } }
@@ -20,7 +20,7 @@ struct SearchTabView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                if query.isEmpty {
+                if trimmed.isEmpty {
                     emptyPrompt
                 } else if isSearching && results.isEmpty {
                     HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 60)
@@ -29,27 +29,22 @@ struct SearchTabView: View {
                 } else {
                     searchResults
                 }
-                Color.clear.frame(height: DS.bottomClearance)
+                Color.clear.miniBarClearance()
             }
+            .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.immediately)
-            .navigationTitle("Search")
-            .navigationBarTitleDisplayMode(.large)
+            .toolbar(.hidden, for: .navigationBar)
             .cardNavigation()
         }
-        .searchable(text: $query, prompt: "Artists, albums, and songs")
-        .autocorrectionDisabled()
         .sheet(item: $pickerTrack) { PlaylistPickerSheet(track: $0) }
-        .onChange(of: query) { _, new in
-            searchTask?.cancel()
-            guard !new.trimmingCharacters(in: .whitespaces).isEmpty else {
-                results = []
-                return
-            }
-            searchTask = Task {
-                try? await Task.sleep(for: .milliseconds(280))
-                guard !Task.isCancelled else { return }
-                await runSearch(query: new)
-            }
+        // Re-runs (and cancels the prior run) whenever the query changes — the sleep debounces.
+        .task(id: query) {
+            guard !trimmed.isEmpty else { results = []; isSearching = false; return }
+            isSearching = true
+            try? await Task.sleep(for: .milliseconds(280))
+            guard !Task.isCancelled else { return }
+            results = (try? await api.search(query: trimmed)) ?? []
+            isSearching = false
         }
     }
 
@@ -143,9 +138,4 @@ struct SearchTabView: View {
             .padding(.bottom, 6)
     }
 
-    private func runSearch(query: String) async {
-        isSearching = true
-        results = (try? await api.search(query: query)) ?? []
-        isSearching = false
-    }
 }

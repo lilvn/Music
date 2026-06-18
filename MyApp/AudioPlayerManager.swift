@@ -22,6 +22,11 @@ class AudioPlayerManager: NSObject, ObservableObject {
     /// Time-observer updates are ignored until this instant (set briefly after a manual seek).
     private var seekSuppressUntil = Date.distantPast
 
+    /// Playback-reporting state: the item id currently reported to Jellyfin as "playing", and a
+    /// counter so the periodic time observer only scrobbles progress every ~10s.
+    private var reportedItemId: String?
+    private var progressTick = 0
+
     @Published var queue = PlaybackQueue()
     @Published var isPlaying = false
     @Published var currentTime: Double = 0
@@ -75,11 +80,13 @@ class AudioPlayerManager: NSObject, ObservableObject {
         if isPlaying {
             player.pause()
             isPlaying = false
+            reportProgress(paused: true)
         } else {
             // If the track finished (queue end, repeat off), restart it from the top.
             if duration > 0, currentTime >= duration - 0.5 { seek(to: 0) }
             player.play()
             isPlaying = true
+            if reportedItemId == nil { reportStart() } else { reportProgress(paused: false) }
         }
         updateNowPlayingRate()
     }
@@ -145,6 +152,7 @@ class AudioPlayerManager: NSObject, ObservableObject {
             updateNowPlayingRate()
         }
         wasPlayingBeforeScrub = false
+        reportProgress(paused: !isPlaying)
     }
 
     // MARK: - Queue editing
@@ -163,6 +171,24 @@ class AudioPlayerManager: NSObject, ObservableObject {
         if !queue.isShuffled { queue.originalItems = queue.items }
     }
 
+    /// Insert a whole set of tracks (an album/playlist) right after the current track.
+    func playNext(_ items: [MediaItem], api: JellyfinAPI) {
+        self.api = api
+        guard !items.isEmpty else { return }
+        guard !queue.items.isEmpty else { play(items: items, api: api); return }
+        queue.items.insert(contentsOf: items, at: min(queue.currentIndex + 1, queue.items.count))
+        if !queue.isShuffled { queue.originalItems = queue.items }
+    }
+
+    /// Append a whole set of tracks (an album/playlist) to the end of the queue.
+    func playLast(_ items: [MediaItem], api: JellyfinAPI) {
+        self.api = api
+        guard !items.isEmpty else { return }
+        guard !queue.items.isEmpty else { play(items: items, api: api); return }
+        queue.items.append(contentsOf: items)
+        if !queue.isShuffled { queue.originalItems = queue.items }
+    }
+
     /// Remove an item from the Up Next list. The currently playing track can't be removed.
     func removeFromQueue(at index: Int) {
         guard queue.items.indices.contains(index), index != queue.currentIndex else { return }
@@ -173,6 +199,7 @@ class AudioPlayerManager: NSObject, ObservableObject {
 
     /// Stop playback entirely and clear all state (used on sign-out).
     func stop() {
+        reportStop()
         cleanup()
         player?.pause()
         player = nil
@@ -209,11 +236,12 @@ class AudioPlayerManager: NSObject, ObservableObject {
 
     // MARK: - Private Loading
 
-    private func loadAndPlay() {
+    private func loadAndPlay(autoplay: Bool = true) {
         guard let item = queue.currentItem,
               let api,
               let url = api.streamURL(for: item) else { return }
 
+        reportStop()   // close out the previously-reported track before switching
         activateAudioSession()
         cleanup()
         isLoading = true
@@ -241,8 +269,11 @@ class AudioPlayerManager: NSObject, ObservableObject {
                 if status == .readyToPlay {
                     self.isLoading = false
                     if dur.isFinite && !dur.isNaN && dur > 0 { self.duration = dur }
-                    self.player?.play()
-                    self.isPlaying = true
+                    if autoplay {
+                        self.player?.play()
+                        self.isPlaying = true
+                        self.reportStart()
+                    }
                     self.updateNowPlayingInfo()
                 } else if status == .failed {
                     self.isLoading = false
@@ -267,6 +298,8 @@ class AudioPlayerManager: NSObject, ObservableObject {
                     self.duration = d
                 }
                 self.updateNowPlayingElapsed()
+                self.progressTick += 1
+                if self.progressTick % 20 == 0 { self.reportProgress(paused: false) }  // ~every 10s
             }
         }
 
@@ -287,9 +320,10 @@ class AudioPlayerManager: NSObject, ObservableObject {
             queue.advanceToNext()
             loadAndPlay()
         } else {
+            // Whole queue finished → reset to the top of the queue, paused and ready to replay.
             isPlaying = false
-            currentTime = duration
-            updateNowPlayingRate()
+            queue.currentIndex = 0
+            loadAndPlay(autoplay: false)
         }
     }
 
@@ -346,14 +380,18 @@ class AudioPlayerManager: NSObject, ObservableObject {
             if isPlaying {
                 player?.pause()
                 isPlaying = false
+                reportProgress(paused: true)
                 updateNowPlayingRate()
             }
         case .ended:
             if let optsRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt,
                AVAudioSession.InterruptionOptions(rawValue: optsRaw).contains(.shouldResume),
                player != nil {
+                // Re-activate the session before resuming (it can go inactive during an interruption).
+                activateAudioSession()
                 player?.play()
                 isPlaying = true
+                reportProgress(paused: false)
                 updateNowPlayingRate()
             }
         @unknown default:
@@ -373,6 +411,30 @@ class AudioPlayerManager: NSObject, ObservableObject {
         }
     }
 #endif
+
+    // MARK: - Jellyfin Playback Reporting (scrobble play/progress/stop)
+
+    private var currentTicks: Int64 { Int64(max(0, currentTime) * 10_000_000) }
+
+    private func reportStart() {
+        guard let api, let id = currentItem?.id else { return }
+        reportedItemId = id
+        let ticks = currentTicks
+        Task { await api.reportPlaybackStart(itemId: id, positionTicks: ticks) }
+    }
+
+    private func reportProgress(paused: Bool) {
+        guard let api, let id = reportedItemId else { return }
+        let ticks = currentTicks
+        Task { await api.reportPlaybackProgress(itemId: id, positionTicks: ticks, isPaused: paused) }
+    }
+
+    private func reportStop() {
+        guard let api, let id = reportedItemId else { return }
+        reportedItemId = nil
+        let ticks = currentTicks
+        Task { await api.reportPlaybackStopped(itemId: id, positionTicks: ticks) }
+    }
 
     // MARK: - Now Playing Info
 

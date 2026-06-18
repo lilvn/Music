@@ -38,18 +38,15 @@ struct NowPlayingView: View {
         .padding(.top, 12)
         .padding(.bottom, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background { ArtworkBackground(url: api.artworkURL(for: player.currentItem ?? .placeholder, size: 700)) }
-        .environment(\.colorScheme, .dark)
+        .background { Color(.systemBackground).ignoresSafeArea() }
         .fullScreenCover(isPresented: $showQueue) {
             QueueSheet()
-                .background { ArtworkBackground(url: api.artworkURL(for: player.currentItem ?? .placeholder, size: 700)) }
-                .environment(\.colorScheme, .dark)
+                .background { Color(.systemBackground).ignoresSafeArea() }
                 .navigationTransition(.zoom(sourceID: "queue", in: sheetZoom))
         }
         .fullScreenCover(isPresented: $showLyrics) {
             LyricsView()
-                .background { ArtworkBackground(url: api.artworkURL(for: player.currentItem ?? .placeholder, size: 700)) }
-                .environment(\.colorScheme, .dark)
+                .background { Color(.systemBackground).ignoresSafeArea() }
                 .navigationTransition(.zoom(sourceID: "lyrics", in: sheetZoom))
         }
     }
@@ -308,7 +305,9 @@ struct LyricsView: View {
                         .padding(.horizontal, 24)
                         .padding(.top, 36)
                         .padding(.bottom, 80)
+                        .killScrollBounce()
                     }
+                    .scrollIndicators(.hidden)
                     .onChange(of: activeIndex) { _, idx in
                         guard let idx else { return }
                         withAnimation(.easeInOut(duration: 0.35)) {
@@ -357,12 +356,14 @@ struct QueueSheet: View {
                         .foregroundStyle(.primary)
                         .textCase(nil)
                         .padding(.bottom, 4)
+                        .killScrollBounce()
                 }
                 Color.clear.frame(height: 84)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
             .listStyle(.plain)
+            .scrollIndicators(.hidden)
             .scrollContentBackground(.hidden)
 
             // Shuffle / repeat pinned to the bottom corners — behave like the lock-screen
@@ -435,13 +436,8 @@ struct LockGlassButton: View {
     var body: some View {
         ZStack {
             Circle()
-                .fill(.clear)
-                .glassEffect(.regular, in: .circle)
-            if active {
-                Circle()
-                    .fill(.primary)
-                    .shadow(color: .primary.opacity(0.35), radius: 10)
-            }
+                .fill(active ? AnyShapeStyle(Color.primary) : AnyShapeStyle(Color(.secondarySystemBackground)))
+                .shadow(color: .black.opacity(0.14), radius: 7, y: 2)
             Image(systemName: system)
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(active ? AnyShapeStyle(Color(.systemBackground)) : AnyShapeStyle(.primary))

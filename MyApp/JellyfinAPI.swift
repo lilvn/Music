@@ -168,6 +168,61 @@ class JellyfinAPI: ObservableObject {
         ])
     }
 
+    /// Recently played songs (most recent first).
+    func fetchRecentlyPlayed(limit: Int = 16) async throws -> [MediaItem] {
+        try await fetchItems(path: "Users/\(userId)/Items", query: [
+            q("IncludeItemTypes", "Audio"),
+            q("SortBy", "DatePlayed"),
+            q("SortOrder", "Descending"),
+            q("Filters", "IsPlayed"),
+            q("Limit", "\(limit)"),
+            q("Recursive", "true"),
+            q("Fields", "PrimaryImageAspectRatio,AlbumArtist,Album,AlbumId,RunTimeTicks"),
+            q("ImageTypeLimit", "1"),
+            q("EnableImageTypes", "Primary"),
+        ])
+    }
+
+    /// Fetch a single item (album / artist / etc.) by id — used to open a detail from Now Playing.
+    func fetchItem(id: String) async throws -> MediaItem {
+        guard let req = request("Users/\(userId)/Items/\(id)", query: [
+            q("Fields", "PrimaryImageAspectRatio,ProductionYear,ChildCount,AlbumArtist,Overview"),
+        ]) else { throw APIError.invalidURL }
+        let (data, response) = try await URLSession.shared.data(for: req)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw APIError.httpError(http.statusCode)
+        }
+        return try JSONDecoder().decode(MediaItem.self, from: data)
+    }
+
+    // MARK: - Playback reporting (scrobble play state back to Jellyfin)
+
+    func reportPlaybackStart(itemId: String, positionTicks: Int64) async {
+        await postPlayback("Sessions/Playing", itemId: itemId, positionTicks: positionTicks, isPaused: false)
+    }
+    func reportPlaybackProgress(itemId: String, positionTicks: Int64, isPaused: Bool) async {
+        await postPlayback("Sessions/Playing/Progress", itemId: itemId, positionTicks: positionTicks, isPaused: isPaused)
+    }
+    func reportPlaybackStopped(itemId: String, positionTicks: Int64) async {
+        await postPlayback("Sessions/Playing/Stopped", itemId: itemId, positionTicks: positionTicks, isPaused: false)
+    }
+
+    private func postPlayback(_ path: String, itemId: String, positionTicks: Int64, isPaused: Bool) async {
+        guard let base = baseURL else { return }
+        var req = URLRequest(url: base.appendingPathComponent(path))
+        req.httpMethod = "POST"
+        req.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "ItemId": itemId,
+            "PositionTicks": positionTicks,
+            "IsPaused": isPaused,
+            "PlayMethod": "DirectStream",
+            "CanSeek": true,
+        ])
+        _ = try? await URLSession.shared.data(for: req)
+    }
+
     func fetchLyrics(itemId: String) async throws -> [LyricLine] {
         guard let req = request("Audio/\(itemId)/Lyrics") else { throw APIError.invalidURL }
         let (data, response) = try await URLSession.shared.data(for: req)

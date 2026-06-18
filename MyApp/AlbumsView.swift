@@ -35,14 +35,14 @@ struct AlbumsView: View {
                         }
                         .padding(.horizontal, DS.gridPad)
                         .padding(.top, 4)
-                        .padding(.bottom, DS.bottomClearance)
+                        .miniBarClearance()
                     }
                 }
             }
+            .scrollIndicators(.hidden)
             .topEdgeFade()
             .toolbar(.hidden, for: .navigationBar)
             .cardNavigation()
-            .refreshable { await load(force: true) }
         }
         .task { await load() }
     }

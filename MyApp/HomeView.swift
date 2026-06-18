@@ -5,6 +5,7 @@ struct HomeView: View {
     @EnvironmentObject var player: AudioPlayerManager
 
     @State private var recentlyAdded: [MediaItem] = []
+    @State private var recentlyPlayed: [MediaItem] = []
     @State private var featured: [MediaItem] = []
     @State private var artists: [MediaItem] = []
     @State private var loaded = false
@@ -23,20 +24,23 @@ struct HomeView: View {
                         if !recentlyAdded.isEmpty {
                             FeaturedShelf(title: "Recently Added", albums: recentlyAdded)
                         }
+                        if !recentlyPlayed.isEmpty {
+                            RecentlyPlayedShelf(tracks: recentlyPlayed)
+                        }
                         if !artists.isEmpty {
                             ArtistsShelf(artists: artists)
                         }
                         if !loaded {
                             ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                         }
-                        Color.clear.frame(height: DS.bottomClearance)
+                        Color.clear.miniBarClearance()
                     }
                 }
+                .scrollIndicators(.hidden)
                 .ignoresSafeArea(edges: .top)
             }
             .toolbar(.hidden, for: .navigationBar)
             .cardNavigation()
-            .refreshable { await load(force: true) }
         }
         .task { await load() }
     }
@@ -44,9 +48,11 @@ struct HomeView: View {
     private func load(force: Bool = false) async {
         guard !loaded || force else { return }
         async let recent = api.fetchRecentlyAdded(limit: 14)
+        async let played = api.fetchRecentlyPlayed(limit: 16)
         async let feat = api.fetchFeatured(limit: 8)
         async let arts = api.fetchArtists(limit: 30)
         recentlyAdded = (try? await recent) ?? recentlyAdded
+        recentlyPlayed = (try? await played) ?? recentlyPlayed
         featured = (try? await feat) ?? featured
         artists = (try? await arts) ?? artists
         loaded = true
@@ -66,7 +72,6 @@ struct CoverFlowShelf: View {
         VStack(alignment: .leading, spacing: 22) {
             Text(title)
                 .font(.largeTitle).fontWeight(.bold)
-                .foregroundStyle(.white)
                 .padding(.horizontal, DS.hPad)
 
             GeometryReader { geo in
@@ -96,26 +101,9 @@ struct CoverFlowShelf: View {
             }
             .frame(height: coverSize * 1.5)
         }
-        .padding(.top, topInset + 14)
-        .padding(.bottom, 14)
+        .padding(.top, topInset + 34)
+        .padding(.bottom, -6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // The dark fill extends far above the band and fades into the system background, so
-        // over-scrolling at the top reveals a smooth gradient instead of a hard black/white edge.
-        .background(alignment: .bottom) {
-            LinearGradient(
-                stops: [
-                    .init(color: Color(.systemBackground), location: 0.0),
-                    .init(color: Color(.systemBackground), location: 0.34),
-                    .init(color: Color(white: 0.11), location: 0.62),
-                    .init(color: Color(white: 0.03), location: 1.0),
-                ],
-                startPoint: .top, endPoint: .bottom
-            )
-            .frame(height: 900)
-            .frame(maxWidth: .infinity)
-            .ignoresSafeArea(edges: .top)
-            .allowsHitTesting(false)
-        }
     }
 }
 
@@ -167,14 +155,13 @@ struct ReflectedCover: View {
                     VStack(spacing: 1) {
                         Text(album.name)
                             .font(.caption).fontWeight(.semibold)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
                         Text(album.albumArtist ?? album.primaryArtist)
                             .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
-                    .shadow(color: .black.opacity(0.6), radius: 3, y: 1)
                     .padding(.top, 5)
                     .frame(width: size)
                 }
@@ -344,6 +331,56 @@ struct ArtistsShelf: View {
                                     .frame(width: 96)
                             }
                         }
+                    }
+                }
+                .padding(.horizontal, DS.hPad)
+            }
+        }
+    }
+}
+
+// MARK: - Recently Played Shelf (horizontal track cards — tap to play)
+
+struct RecentlyPlayedShelf: View {
+    let tracks: [MediaItem]
+    @EnvironmentObject var api: JellyfinAPI
+    @EnvironmentObject var player: AudioPlayerManager
+    private let cardSize: CGFloat = 132
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Recently Played")
+                .font(.largeTitle).fontWeight(.bold)
+                .padding(.horizontal, DS.hPad)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 14) {
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                        Button { player.play(items: tracks, from: index, api: api) } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                AsyncImage(url: api.artworkURL(for: track, size: 400)) { phase in
+                                    if case .success(let img) = phase {
+                                        img.resizable().aspectRatio(1, contentMode: .fill)
+                                    } else {
+                                        Color(.systemGray6)
+                                            .overlay { Image(systemName: "music.note").foregroundStyle(Color(.systemGray4)) }
+                                    }
+                                }
+                                .frame(width: cardSize, height: cardSize)
+                                .clipShape(RoundedRectangle(cornerRadius: DS.cornerCard, style: .continuous))
+                                .shadow(color: .black.opacity(DS.shadowOpacity), radius: DS.shadowRadius, y: DS.shadowY)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(track.name)
+                                        .font(.footnote).fontWeight(.semibold)
+                                        .foregroundStyle(.primary).lineLimit(1)
+                                    Text(track.primaryArtist)
+                                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                .frame(width: cardSize, alignment: .leading)
+                            }
+                        }
+                        .buttonStyle(ScaleButtonStyle())
                     }
                 }
                 .padding(.horizontal, DS.hPad)
