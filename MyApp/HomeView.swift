@@ -117,59 +117,61 @@ struct ReflectedCover: View {
 
     @State private var uiImage: UIImage?
 
+    /// Cover + CD composition. Tapping plays the album: the cover slides left while the spinning CD
+    /// slides out from behind it. Rendered twice — upright, and mirrored as the reflection.
+    private var artworkStack: some View {
+        ZStack {
+            SpinningDisc(artURL: api.artworkURL(for: album, size: 400),
+                         size: size * 0.9,
+                         spinning: isCurrent && player.isPlaying)
+                .offset(x: isCurrent ? size * 0.3 : 0)
+                .opacity(isCurrent ? 1 : 0)
+
+            cover(uiImage)
+                .offset(x: isCurrent ? -size * 0.1 : 0)
+        }
+        .frame(width: size, height: size)
+        .animation(.spring(response: 0.55, dampingFraction: 0.74), value: isCurrent)
+    }
+
     var body: some View {
-            VStack(spacing: 0) {
-                // Tapping plays the album: the cover slides left while a CD slides out from
-                // behind it to the right and spins.
-                ZStack {
-                    SpinningDisc(artURL: api.artworkURL(for: album, size: 400),
-                                 size: size * 0.9,
-                                 spinning: isCurrent && player.isPlaying)
-                        .offset(x: isCurrent ? size * 0.3 : 0)
-                        .opacity(isCurrent ? 1 : 0)
+        VStack(spacing: 0) {
+            artworkStack
 
-                    cover(uiImage)
-                        .offset(x: isCurrent ? -size * 0.1 : 0)
+            // Reflection mirrors the WHOLE artwork — the cover AND the spinning CD when it's out —
+            // so the disc keeps its reflection instead of floating untethered.
+            ZStack(alignment: .top) {
+                artworkStack
+                    .scaleEffect(y: -1)
+                    .frame(height: size * 0.5, alignment: .top)
+                    .clipped()
+                    .mask(
+                        LinearGradient(colors: [.white.opacity(0.4), .clear],
+                                       startPoint: .top, endPoint: .bottom)
+                    )
+
+                VStack(spacing: 1) {
+                    Text(album.name)
+                        .font(.caption).fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(album.albumArtist ?? album.primaryArtist)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .frame(width: size, height: size)
-                .animation(.spring(response: 0.55, dampingFraction: 0.74), value: isCurrent)
-
-                // Reflection with the title/artist floating in front of it, close to the cover.
-                // It slides left in sync with the cover so it tracks the now-playing state.
-                ZStack(alignment: .top) {
-                    cover(uiImage)
-                        .scaleEffect(y: -1)
-                        .frame(height: size * 0.5, alignment: .top)
-                        .clipped()
-                        .mask(
-                            LinearGradient(colors: [.white.opacity(0.4), .clear],
-                                           startPoint: .top, endPoint: .bottom)
-                        )
-                        .offset(x: isCurrent ? -size * 0.1 : 0)
-                        .animation(.spring(response: 0.55, dampingFraction: 0.74), value: isCurrent)
-
-                    VStack(spacing: 1) {
-                        Text(album.name)
-                            .font(.caption).fontWeight(.semibold)
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        Text(album.albumArtist ?? album.primaryArtist)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    .padding(.top, 5)
-                    .frame(width: size)
-                }
+                .padding(.top, 5)
+                .frame(width: size)
             }
-            .contentShape(Rectangle())
-            .onTapGesture { playAlbum() }
-            .frame(width: size)
-            .task(id: album.id) {
-                guard uiImage == nil, let url = api.artworkURL(for: album, size: 600) else { return }
-                if let cached = ImageStore.shared.cached(url) { uiImage = cached }
-                else { uiImage = await ImageStore.shared.load(url, maxPixel: 600) }
-            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { playAlbum() }
+        .frame(width: size)
+        .task(id: album.id) {
+            guard uiImage == nil, let url = api.artworkURL(for: album, size: 600) else { return }
+            if let cached = ImageStore.shared.cached(url) { uiImage = cached }
+            else { uiImage = await ImageStore.shared.load(url, maxPixel: 600) }
+        }
     }
 
     private func playAlbum() {

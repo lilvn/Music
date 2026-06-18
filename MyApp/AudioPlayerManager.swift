@@ -49,6 +49,8 @@ class AudioPlayerManager: NSObject, ObservableObject {
     @Published var isLoading = false
     /// Drives the full-screen Now Playing sheet, presented once at the app's top level.
     @Published var showNowPlaying = false
+    /// Name of the current audio output (e.g. "iPhone", "AirPods Pro", an AirPlay device).
+    @Published var outputRouteName: String = "iPhone"
 
     var currentItem: MediaItem? { queue.currentItem }
 
@@ -57,6 +59,13 @@ class AudioPlayerManager: NSObject, ObservableObject {
         configureAudioSession()
         setupRemoteControls()
         setupNotifications()
+        updateOutputRoute()
+    }
+
+    private func updateOutputRoute() {
+#if os(iOS) || os(tvOS)
+        outputRouteName = AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName ?? "iPhone"
+#endif
     }
 
     deinit {
@@ -529,6 +538,7 @@ class AudioPlayerManager: NSObject, ObservableObject {
     }
 
     private func handleRouteChange(_ note: Notification) {
+        updateOutputRoute()
         guard let info = note.userInfo,
               let raw = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return }

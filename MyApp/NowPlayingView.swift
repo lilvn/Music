@@ -1,17 +1,35 @@
 import SwiftUI
 import AVKit
+import MediaPlayer
 
-/// System AirPlay / output-route picker (wraps `AVRoutePickerView`).
+/// System AirPlay / output-route picker (wraps `AVRoutePickerView`). Use `tint: .clear` to make it
+/// an invisible tap target layered over a custom pill.
 struct AirPlayButton: UIViewRepresentable {
+    var tint: UIColor = .label
     func makeUIView(context: Context) -> AVRoutePickerView {
         let v = AVRoutePickerView()
         v.backgroundColor = .clear
-        v.tintColor = .label
-        v.activeTintColor = .label
+        v.tintColor = tint
+        v.activeTintColor = tint
         v.prioritizesVideoDevices = false
         return v
     }
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
+        uiView.tintColor = tint
+        uiView.activeTintColor = tint
+    }
+}
+
+/// System volume slider (wraps `MPVolumeView`). The route button is hidden — AirPlay lives in the
+/// pill. Note: only functional on a real device; the simulator has no volume hardware.
+struct VolumeSlider: UIViewRepresentable {
+    func makeUIView(context: Context) -> MPVolumeView {
+        let v = MPVolumeView()
+        v.showsRouteButton = false
+        v.tintColor = UIColor.label
+        return v
+    }
+    func updateUIView(_ uiView: MPVolumeView, context: Context) {}
 }
 
 /// Now Playing — a standard sheet that slides up from the bottom and swipes down to close.
@@ -43,9 +61,11 @@ struct NowPlayingView: View {
                 onScrubEnd: { player.endScrubbing(to: $0) },
                 onTap: { player.seek(to: $0) }
             )
-            Spacer(minLength: 26)
+            Spacer(minLength: 24)
             mainControls
-            Spacer(minLength: 28)
+            Spacer(minLength: 22)
+            volumeRow
+            Spacer(minLength: 22)
             secondaryRow
             Spacer(minLength: 10)
         }
@@ -95,6 +115,7 @@ struct NowPlayingView: View {
         .shadow(color: .black.opacity(0.22), radius: 24, y: 14)
         .scaleEffect(player.isPlaying ? 1.0 : 0.9)
         .animation(.spring(response: 0.55, dampingFraction: 0.72), value: player.isPlaying)
+        .layoutPriority(1)   // claim space first so the added rows don't squeeze the artwork
     }
 
     private var trackInfo: some View {
@@ -163,32 +184,54 @@ struct NowPlayingView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var secondaryRow: some View {
+    /// System volume slider flanked by speaker glyphs (works on a real device).
+    private var volumeRow: some View {
         HStack(spacing: 12) {
-            Button { showQueue = true } label: {
-                Image(systemName: "list.bullet")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-            }
-            .matchedTransitionSource(id: "queue", in: sheetZoom)
-            .buttonStyle(.bordered)
-            .tint(.primary)
-
-            AirPlayButton()
-                .frame(maxWidth: .infinity)
-                .frame(height: 44)
-                .background(Color(.secondarySystemBackground), in: .capsule)
-
-            Button { showLyrics = true } label: {
-                Image(systemName: "quote.bubble")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-            }
-            .matchedTransitionSource(id: "lyrics", in: sheetZoom)
-            .buttonStyle(.bordered)
-            .tint(.primary)
+            Image(systemName: "speaker.fill").font(.caption).foregroundStyle(.secondary)
+            VolumeSlider().frame(height: 30)
+            Image(systemName: "speaker.wave.3.fill").font(.caption).foregroundStyle(.secondary)
         }
-        .font(.title3)
+    }
+
+    /// Round Up Next (left) and Lyrics (right) flanking a wide AirPlay pill.
+    private var secondaryRow: some View {
+        HStack(spacing: 14) {
+            roundSecondary(icon: "list.bullet", source: "queue") { showQueue = true }
+            airPlayPill
+            roundSecondary(icon: "quote.bubble", source: "lyrics") { showLyrics = true }
+        }
+    }
+
+    private func roundSecondary(icon: String, source: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(.primary)
+                .frame(width: 54, height: 54)
+                .background(Color(.secondarySystemBackground), in: .circle)
+        }
+        .buttonStyle(.plain)
+        .matchedTransitionSource(id: source, in: sheetZoom)
+    }
+
+    /// Wide pill showing the current output device; the whole pill opens the AirPlay menu
+    /// (an invisible `AVRoutePickerView` is layered over the custom content).
+    private var airPlayPill: some View {
+        ZStack {
+            HStack(spacing: 8) {
+                Image(systemName: "airplayaudio")
+                Text(player.outputRouteName).lineLimit(1)
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .background(Color(.secondarySystemBackground), in: .capsule)
+
+            AirPlayButton(tint: .clear)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 }
 
