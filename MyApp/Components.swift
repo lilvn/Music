@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Design Constants
+// MARK: - Design constants
 
 enum DS {
     static let hPad: CGFloat = 20          // horizontal padding for lists
@@ -12,297 +12,75 @@ enum DS {
     static let shadowRadius: CGFloat = 8
     static let shadowY: CGFloat = 4
     static let shadowOpacity: CGFloat = 0.12
-    static let bottomClearance: CGFloat = 80   // clears the now-playing bar + search bar + tab bar
 }
 
-// MARK: - Navigation
+// MARK: - Native push navigation + zoom card-expand
 
-/// Value-based navigation route. Identifiable so it can drive a `.sheet(item:)`.
-enum LibraryRoute: Hashable, Identifiable {
-    case album(MediaItem)
-    case artist(MediaItem)
-    case playlist(MediaItem)
+/// Shares a stack's zoom `Namespace` with the cards inside it, so a `LibraryLink` deep in the tree
+/// can mark its source for the zoom transition the stack's `navigationDestination` applies.
+private struct ZoomNamespaceKey: EnvironmentKey {
+    static let defaultValue: Namespace.ID? = nil
+}
+extension EnvironmentValues {
+    var zoomNamespace: Namespace.ID? {
+        get { self[ZoomNamespaceKey.self] }
+        set { self[ZoomNamespaceKey.self] = newValue }
+    }
+}
 
-    var id: String {
-        switch self {
-        case .album(let m):    return "album-\(m.id)"
-        case .artist(let m):   return "artist-\(m.id)"
-        case .playlist(let m): return "playlist-\(m.id)"
+/// A tab's root `NavigationStack`. Detail routes PUSH (so the tab bar + mini player stay above them)
+/// and zoom-expand out of the tapped card. One namespace per stack, threaded to cards via the
+/// environment; nested pushes (an album opened from an artist) reuse the same destination + zoom.
+struct LibraryStack<Root: View>: View {
+    @ViewBuilder var root: () -> Root
+    @Namespace private var ns
+
+    var body: some View {
+        NavigationStack {
+            root()
+                .navigationDestination(for: LibraryRoute.self) { route in
+                    destinationView(for: route)
+                        .navigationTransition(.zoom(sourceID: route.id, in: ns))
+                }
         }
+        .environment(\.zoomNamespace, ns)
+    }
+}
+
+/// A tappable card that pushes `route` with the zoom card-expand (when a `LibraryStack` namespace is
+/// in scope; falls back to a plain push otherwise).
+struct LibraryLink<Label: View>: View {
+    let route: LibraryRoute
+    @ViewBuilder var label: () -> Label
+    @Environment(\.zoomNamespace) private var ns
+
+    var body: some View {
+        NavigationLink(value: route) { label() }
+            .buttonStyle(ScaleButtonStyle())
+            .modifier(MatchedSourceIfAvailable(id: route.id, ns: ns))
+    }
+}
+
+private struct MatchedSourceIfAvailable: ViewModifier {
+    let id: String
+    let ns: Namespace.ID?
+    func body(content: Content) -> some View {
+        if let ns { content.matchedTransitionSource(id: id, in: ns) }
+        else { content }
     }
 }
 
 @ViewBuilder
 func destinationView(for route: LibraryRoute) -> some View {
     switch route {
-    case .album(let album):       AlbumDetailView(album: album)
-    case .artist(let artist):     ArtistDetailView(artist: artist)
-    case .playlist(let playlist): PlaylistDetailView(playlist: playlist)
+    case .album(let album):   AlbumDetailView(album: album)
+    case .artist(let artist): ArtistDetailView(artist: artist)
+    case .playlist:           // Playlists land in Phase 2.
+        ContentUnavailableView("Coming soon", systemImage: "music.note.list")
     }
 }
 
-// MARK: - Card-open navigation (detail PUSHES within the tab so the chrome stays above it)
-
-struct OpenDetailAction {
-    let namespace: Namespace.ID
-}
-
-private struct OpenDetailKey: EnvironmentKey {
-    static let defaultValue: OpenDetailAction? = nil
-}
-
-extension EnvironmentValues {
-    var openDetail: OpenDetailAction? {
-        get { self[OpenDetailKey.self] }
-        set { self[OpenDetailKey.self] = newValue }
-    }
-}
-
-/// Install once per screen that shows cards. Provides `openDetail` and presents the zoom cover that
-/// scales out of the tapped card; the native zoom dismiss (drag down to shrink back) closes it.
-private struct CardNavigation: ViewModifier {
-    @Namespace private var ns
-
-    func body(content: Content) -> some View {
-        content
-            .environment(\.openDetail, OpenDetailAction(namespace: ns))
-            // Push details onto the tab's own NavigationStack (instead of a full-screen cover) so
-            // the bottom chrome — nav bar + mini player — stays ABOVE them; only Now Playing covers
-            // the whole screen. The zoom card-expand still animates the push, and the same handler
-            // serves nested pushes (an album opened from inside an artist).
-            .navigationDestination(for: LibraryRoute.self) { route in
-                destinationView(for: route)
-                    .navigationTransition(.zoom(sourceID: route.id, in: ns))
-            }
-    }
-}
-
-extension View {
-    func cardNavigation() -> some View { modifier(CardNavigation()) }
-}
-
-/// A tappable card that pushes `route` (zoom card-expand) via the ambient `openDetail` namespace.
-struct NavCard<Label: View>: View {
-    let route: LibraryRoute
-    @ViewBuilder var label: () -> Label
-    @Environment(\.openDetail) private var action
-
-    var body: some View {
-        NavigationLink(value: route) { label() }
-            .buttonStyle(ScaleButtonStyle())
-            .modifier(OptionalMatchedSource(id: route.id, ns: action?.namespace))
-    }
-}
-
-/// Applies `matchedTransitionSource` only when a namespace is available.
-private struct OptionalMatchedSource: ViewModifier {
-    let id: String
-    let ns: Namespace.ID?
-    func body(content: Content) -> some View {
-        Group {
-            if let ns { content.matchedTransitionSource(id: id, in: ns) }
-            else { content }
-        }
-    }
-}
-
-
-
-// MARK: - Track swipe actions (native, monochrome — full-swipe plays next)
-
-extension View {
-    /// Native trailing swipe → Play Next (full-swipe) / Play Last; optional leading swipe → Remove.
-    @ViewBuilder
-    func trackSwipeActions(onPlayNext: (() -> Void)?,
-                           onPlayLast: (() -> Void)?,
-                           onRemove: (() -> Void)? = nil) -> some View {
-        self
-            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                if let onPlayNext {
-                    Button { onPlayNext() } label: {
-                        Image(systemName: "text.line.first.and.arrowtriangle.forward")
-                    }
-                    .tint(Color(.systemGray2))
-                }
-                if let onPlayLast {
-                    Button { onPlayLast() } label: {
-                        Image(systemName: "text.line.last.and.arrowtriangle.forward")
-                    }
-                    .tint(Color(.systemGray3))
-                }
-            }
-            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                if let onRemove {
-                    Button(role: .destructive) { onRemove() } label: {
-                        Image(systemName: "minus.circle")
-                    }
-                }
-            }
-    }
-}
-
-// MARK: - Top edge fade
-
-extension View {
-    /// Fades scroll content out near the top so it dissolves under the notch / sheet grabber
-    /// instead of being cut off sharply.
-    func topEdgeFade(_ height: CGFloat = 46) -> some View {
-        mask(
-            VStack(spacing: 0) {
-                LinearGradient(
-                    stops: [.init(color: .clear, location: 0), .init(color: .black, location: 1)],
-                    startPoint: .top, endPoint: .bottom
-                )
-                .frame(height: height)
-                Rectangle().fill(.black)
-            }
-            .ignoresSafeArea()
-        )
-    }
-}
-
-// MARK: - Artwork background (blurred art + dark gradient — same look as the Featured cards)
-
-struct ArtworkBackground: View {
-    let url: URL?
-
-    var body: some View {
-        ZStack {
-            Color.black
-            AsyncImage(url: url) { phase in
-                if case .success(let img) = phase {
-                    img.resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    Color(white: 0.12)
-                }
-            }
-            .blur(radius: 55)
-            .opacity(0.85)
-            // Darker at the very top so the status bar / clock reads cleanly, art breathes through
-            // the middle, dark again at the bottom for legible track lists.
-            LinearGradient(stops: [
-                .init(color: .black.opacity(0.62), location: 0.0),
-                .init(color: .black.opacity(0.32), location: 0.3),
-                .init(color: .black.opacity(0.55), location: 0.62),
-                .init(color: .black.opacity(0.9), location: 1.0),
-            ], startPoint: .top, endPoint: .bottom)
-        }
-        .ignoresSafeArea()
-    }
-}
-
-// MARK: - Spinning CD (shared by the mini bar and the Recently Added carousel)
-
-struct SpinningDisc: View {
-    let artURL: URL?
-    let size: CGFloat
-    let spinning: Bool
-
-    /// Shared so the mini-bar CD and the carousel CD turn at exactly the same rate.
-    static let spinSpeed: Double = 52   // degrees / second
-
-    @State private var spinBase: Double = 0
-    @State private var spinRef = Date()
-
-    var body: some View {
-        TimelineView(.animation(paused: !spinning)) { context in
-            let angle = spinning
-                ? spinBase + context.date.timeIntervalSince(spinRef) * Self.spinSpeed
-                : spinBase
-            disc.rotationEffect(.degrees(angle))
-        }
-        .onChange(of: spinning) { _, now in
-            if now { spinRef = Date() }
-            else { spinBase += Date().timeIntervalSince(spinRef) * Self.spinSpeed }
-        }
-    }
-
-    private var disc: some View {
-        ZStack {
-            // CD face = album art.
-            LibraryImage(url: artURL, maxPixel: 400) { Color(.systemGray4) }
-                .clipShape(Circle())
-
-            // Iridescent disc sheen.
-            Circle()
-                .fill(AngularGradient(
-                    gradient: Gradient(colors: [
-                        .clear, .white.opacity(0.38), .clear, .cyan.opacity(0.22), .clear,
-                        .white.opacity(0.32), .clear, .pink.opacity(0.18), .clear,
-                    ]),
-                    center: .center))
-                .blendMode(.screen)
-                .opacity(0.55)
-
-            // Outer rim highlight.
-            Circle().strokeBorder(.white.opacity(0.18), lineWidth: max(0.5, size * 0.012))
-
-            // Characteristic reflective CD ring around the hub.
-            Circle()
-                .strokeBorder(
-                    AngularGradient(
-                        colors: [.white.opacity(0.6), .white.opacity(0.1), .white.opacity(0.55),
-                                 .white.opacity(0.1), .white.opacity(0.6)],
-                        center: .center),
-                    lineWidth: max(1, size * 0.022))
-                .frame(width: size * 0.46, height: size * 0.46)
-
-            // Hub (clear plastic label area) + spindle hole.
-            Circle().fill(Color(.systemBackground)).frame(width: size * 0.32, height: size * 0.32)
-            Circle().strokeBorder(.white.opacity(0.3), lineWidth: 0.8)
-                .frame(width: size * 0.32, height: size * 0.32)
-            Circle().fill(Color(.systemBackground).opacity(0.5)).frame(width: size * 0.11, height: size * 0.11)
-            Circle().strokeBorder(.black.opacity(0.3), lineWidth: 0.7)
-                .frame(width: size * 0.11, height: size * 0.11)
-        }
-        .frame(width: size, height: size)
-    }
-}
-
-// MARK: - Bottom chrome clearance
-
-/// Extra bottom padding so a scroll view's last items clear the floating bottom chrome. The bottom
-/// safe-area inset reserves the tab/search bar, but the mini player animates in on top and isn't
-/// reliably reserved — so add its height back whenever something is playing.
-struct MiniBarClearance: ViewModifier {
-    @EnvironmentObject var player: AudioPlayerManager
-    func body(content: Content) -> some View {
-        content.padding(.bottom, player.currentItem != nil ? 132 : 66)
-    }
-}
-
-extension View {
-    func miniBarClearance() -> some View { modifier(MiniBarClearance()) }
-}
-
-// MARK: - Queue action button (round secondary action beside the Play pill)
-
-/// Flat round button used on detail pages for "play next" / "add to queue", flanking the Play pill.
-struct QueueActionButton: View {
-    let icon: String
-    var disabled: Bool = false
-    let action: () -> Void
-    @State private var bump = false
-
-    var body: some View {
-        Button {
-            action()
-            bump.toggle()
-        } label: {
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.primary)
-                .frame(width: 52, height: 52)
-                .background(Color(.secondarySystemBackground), in: .circle)
-        }
-        .buttonStyle(ScaleButtonStyle())
-        .disabled(disabled)
-        .opacity(disabled ? 0.4 : 1)
-        .sensoryFeedback(.impact(weight: .light), trigger: bump)
-    }
-}
-
-// MARK: - Scale Press Button Style
+// MARK: - Scale-press button style
 
 struct ScaleButtonStyle: ButtonStyle {
     var scale: CGFloat = 0.95
@@ -313,15 +91,15 @@ struct ScaleButtonStyle: ButtonStyle {
     }
 }
 
-// MARK: - Album Card (fluid — fills whatever width the grid gives it)
+// MARK: - Album card (fills whatever width the grid gives it)
 
 struct AlbumCard: View {
     let album: MediaItem
-    @EnvironmentObject var api: JellyfinAPI
+    @Environment(JellyfinClient.self) private var client
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LibraryImage(url: api.artworkURL(for: album, size: 400), maxPixel: 400) {
+            LibraryImage(url: client.artworkURL(for: album, size: 400), maxPixel: 400) {
                 Color(.systemGray6)
                     .overlay {
                         Image(systemName: "music.note")
@@ -336,28 +114,24 @@ struct AlbumCard: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(album.name)
-                    .font(.footnote)
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
+                    .font(.footnote).fontWeight(.semibold).lineLimit(1)
                 Text(album.albumArtist ?? album.primaryArtist)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
         }
     }
 }
 
-// MARK: - Artist Row
+// MARK: - Artist row
 
 struct ArtistRow: View {
     let artist: MediaItem
     var large: Bool = false
-    @EnvironmentObject var api: JellyfinAPI
+    @Environment(JellyfinClient.self) private var client
 
     var body: some View {
         HStack(spacing: 14) {
-            LibraryImage(url: api.artworkURL(for: artist, size: 120), maxPixel: 200) {
+            LibraryImage(url: client.artworkURL(for: artist, size: 120), maxPixel: 200) {
                 Color(.systemGray5)
                     .overlay {
                         Image(systemName: "person.fill")
@@ -383,8 +157,7 @@ struct ArtistRow: View {
             Spacer()
 
             Image(systemName: "chevron.right")
-                .font(.footnote)
-                .fontWeight(.semibold)
+                .font(.footnote).fontWeight(.semibold)
                 .foregroundStyle(Color(.systemGray3))
         }
         .padding(.horizontal, DS.hPad)
@@ -393,22 +166,18 @@ struct ArtistRow: View {
     }
 }
 
-// MARK: - Song Row
+// MARK: - Song row
 
 struct SongRow: View {
     let song: MediaItem
     var showAlbumArt: Bool = false
     /// Explicit number for the leading column (album detail), so singles with no `IndexNumber`
-    /// still show a number and match multi-track albums. Falls back to the item's own index.
+    /// still show a number. Falls back to the item's own index.
     var trackNumber: Int? = nil
     let onTap: () -> Void
-    var onPlayNext: (() -> Void)? = nil
-    var onPlayLast: (() -> Void)? = nil
-    var onAddToPlaylist: (() -> Void)? = nil
-    var onRemove: (() -> Void)? = nil
     var large: Bool = false
-    @EnvironmentObject var api: JellyfinAPI
-    @EnvironmentObject var player: AudioPlayerManager
+    @Environment(JellyfinClient.self) private var client
+    @Environment(Player.self) private var player
 
     private var isCurrent: Bool { player.currentItem?.id == song.id }
 
@@ -423,26 +192,12 @@ struct SongRow: View {
         .frame(minHeight: large ? 68 : 56)
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
-        .contextMenu {
-            if let onPlayNext {
-                Button { onPlayNext() } label: { Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward") }
-            }
-            if let onPlayLast {
-                Button { onPlayLast() } label: { Label("Play Last", systemImage: "text.line.last.and.arrowtriangle.forward") }
-            }
-            if let onAddToPlaylist {
-                Button { onAddToPlaylist() } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }
-            }
-            if let onRemove {
-                Button(role: .destructive) { onRemove() } label: { Label("Remove from Playlist", systemImage: "minus.circle") }
-            }
-        }
     }
 
     @ViewBuilder
     private var leading: some View {
         if showAlbumArt {
-            LibraryImage(url: api.artworkURL(for: song, size: 100), maxPixel: 160) {
+            LibraryImage(url: client.artworkURL(for: song, size: 100), maxPixel: 160) {
                 Color(.systemGray6)
             }
             .frame(width: large ? 56 : 46, height: large ? 56 : 46)
@@ -456,8 +211,7 @@ struct SongRow: View {
                                       isActive: isCurrent && player.isPlaying)
                 } else if let num = trackNumber ?? song.indexNumber {
                     Text("\(num)")
-                        .font(.footnote)
-                        .monospacedDigit()
+                        .font(.footnote).monospacedDigit()
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -496,11 +250,49 @@ struct SongRow: View {
     }
 }
 
-// MARK: - Artist Detail
+// MARK: - Centered state (loading / empty / error)
+
+struct CenteredState<Accessory: View>: View {
+    let systemImage: String?
+    let title: String
+    var loading: Bool = false
+    @ViewBuilder var accessory: () -> Accessory
+
+    init(systemImage: String?, title: String, loading: Bool = false,
+         @ViewBuilder accessory: @escaping () -> Accessory = { EmptyView() }) {
+        self.systemImage = systemImage
+        self.title = title
+        self.loading = loading
+        self.accessory = accessory
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Spacer().frame(height: 100)
+            if loading {
+                ProgressView()
+            } else if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 40, weight: .light))
+                    .foregroundStyle(.secondary)
+            }
+            Text(title)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            accessory()
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, DS.hPad)
+    }
+}
+
+// MARK: - Artist detail (hero header + album grid)
 
 struct ArtistDetailView: View {
     let artist: MediaItem
-    @EnvironmentObject var api: JellyfinAPI
+    @Environment(JellyfinClient.self) private var client
     @State private var albums: [MediaItem] = []
     @State private var isLoading = true
 
@@ -511,7 +303,6 @@ struct ArtistDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 heroHeader
-                    .killScrollBounce()
 
                 if isLoading {
                     ProgressView().padding(48)
@@ -523,28 +314,26 @@ struct ArtistDetailView: View {
                 } else {
                     LazyVGrid(columns: cols, spacing: DS.gridSpacing + 4) {
                         ForEach(albums) { album in
-                            NavCard(route: .album(album)) { AlbumCard(album: album) }
+                            LibraryLink(route: .album(album)) { AlbumCard(album: album) }
                         }
                     }
                     .padding(.horizontal, DS.gridPad)
                     .padding(.top, 16)
                 }
-
-                Color.clear.miniBarClearance()
             }
         }
         .scrollIndicators(.hidden)
         .ignoresSafeArea(edges: .top)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            albums = (try? await api.fetchAlbums(artistId: artist.id)) ?? []
+            albums = (try? await client.fetchAlbums(artistId: artist.id)) ?? []
             isLoading = false
         }
     }
 
     private var heroHeader: some View {
         ZStack(alignment: .bottomLeading) {
-            LibraryImage(url: api.artworkURL(for: artist, size: 600), maxPixel: 700) {
+            LibraryImage(url: client.artworkURL(for: artist, size: 600), maxPixel: 700) {
                 Color(.systemGray5)
             }
             .frame(maxWidth: .infinity)
@@ -573,43 +362,5 @@ struct ArtistDetailView: View {
             .padding(.horizontal, DS.hPad)
             .padding(.bottom, 20)
         }
-    }
-}
-
-// MARK: - Scroll bounce killer (for zoom-presented detail covers)
-
-/// Walks up to the nearest enclosing `UIScrollView` and turns OFF its vertical bounce. A
-/// zoom-presented (`.navigationTransition(.zoom)`) cover only converts a downward drag at the
-/// very top into the interactive shrink-back dismiss when the inner scroll view *doesn't* rubber
-/// band there — otherwise the over-scroll swallows the gesture. Disabling `bounces` hands that
-/// top-edge drag straight to the dismiss. Must live INSIDE the scrollable content (e.g. as a
-/// row/header background) so the scroll view is an ancestor.
-private struct ScrollBounceKiller: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIView {
-        let v = UIView(frame: .zero)
-        v.isUserInteractionEnabled = false
-        return v
-    }
-    func updateUIView(_ uiView: UIView, context: Context) {
-        DispatchQueue.main.async {
-            var view: UIView? = uiView.superview
-            while let v = view {
-                if let scroll = v as? UIScrollView {
-                    scroll.bounces = false
-                    scroll.alwaysBounceVertical = false
-                    break
-                }
-                view = v.superview
-            }
-        }
-    }
-}
-
-extension View {
-    /// Disables the enclosing scroll view's bounce so a top-edge downward drag becomes the zoom
-    /// interactive dismiss instead of a rubber-band over-scroll. Attach to content that is always
-    /// realized at the top of the scroll (a header), so it can reach the scroll view immediately.
-    func killScrollBounce() -> some View {
-        background(ScrollBounceKiller().frame(width: 0, height: 0))
     }
 }

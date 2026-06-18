@@ -1,17 +1,18 @@
 import Foundation
-import SwiftUI
-import Combine
+import Observation
 
+/// Jellyfin REST data layer. Async `URLSession` throughout — no Combine.
+/// Personal single-user app: credentials are baked in, there is no login flow.
 @MainActor
-class JellyfinAPI: ObservableObject {
+@Observable
+final class JellyfinClient {
     /// Shared instance so App Intents (Siri / Shortcuts) can reach the API outside the view tree.
-    static let shared = JellyfinAPI()
+    static let shared = JellyfinClient()
 
-    // Personal single-user app — credentials are baked in, no login flow.
-    let serverURL    = "https://music.485-0.com"
-    let accessToken  = "7bf28a1d98424dd0bfab971128840bba"
-    let userId       = "55044ca5301b4cc5b69bf1eb6974d684"
-    let username     = "485"
+    let serverURL   = "https://music.485-0.com"
+    let accessToken = "7bf28a1d98424dd0bfab971128840bba"
+    let userId      = "55044ca5301b4cc5b69bf1eb6974d684"
+    let username    = "485"
 
     private var baseURL: URL? { URL(string: serverURL) }
 
@@ -34,7 +35,7 @@ class JellyfinAPI: ObservableObject {
         ])
     }
 
-    /// A rotating set of albums for the Featured shelf.
+    /// A rotating set of albums for the Featured cover-flow shelf.
     func fetchFeatured(limit: Int = 8) async throws -> [MediaItem] {
         try await fetchItems(path: "Users/\(userId)/Items", query: [
             q("IncludeItemTypes", "MusicAlbum"),
@@ -114,62 +115,6 @@ class JellyfinAPI: ObservableObject {
         ])
     }
 
-    // MARK: - Playlist editing
-
-    @discardableResult
-    func createPlaylist(name: String, itemIds: [String] = []) async throws -> String {
-        guard let base = baseURL else { throw APIError.invalidURL }
-        var req = URLRequest(url: base.appendingPathComponent("Playlists"))
-        req.httpMethod = "POST"
-        req.setValue(authHeader, forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: [
-            "Name": name, "Ids": itemIds, "UserId": userId, "MediaType": "Audio",
-        ])
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        try ensureOK(resp)
-        return (try? JSONDecoder().decode(CreatePlaylistResult.self, from: data).id) ?? ""
-    }
-
-    func addToPlaylist(_ playlistId: String, itemIds: [String]) async throws {
-        try await sendMutation("Playlists/\(playlistId)/Items", method: "POST",
-                               query: [q("ids", itemIds.joined(separator: ",")), q("userId", userId)])
-    }
-
-    func removeFromPlaylist(_ playlistId: String, entryIds: [String]) async throws {
-        try await sendMutation("Playlists/\(playlistId)/Items", method: "DELETE",
-                               query: [q("entryIds", entryIds.joined(separator: ","))])
-    }
-
-    func deletePlaylist(_ id: String) async throws {
-        try await sendMutation("Items/\(id)", method: "DELETE", query: [])
-    }
-
-    /// Move a playlist entry (its `playlistItemId`) to a new position.
-    func movePlaylistItem(_ playlistId: String, entryId: String, to newIndex: Int) async throws {
-        try await sendMutation("Playlists/\(playlistId)/Items/\(entryId)/Move/\(newIndex)",
-                               method: "POST", query: [])
-    }
-
-    private func sendMutation(_ path: String, method: String, query: [URLQueryItem]) async throws {
-        guard let base = baseURL,
-              var comps = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)
-        else { throw APIError.invalidURL }
-        if !query.isEmpty { comps.queryItems = query }
-        guard let url = comps.url else { throw APIError.invalidURL }
-        var req = URLRequest(url: url)
-        req.httpMethod = method
-        req.setValue(authHeader, forHTTPHeaderField: "Authorization")
-        let (_, resp) = try await URLSession.shared.data(for: req)
-        try ensureOK(resp)
-    }
-
-    private func ensureOK(_ resp: URLResponse) throws {
-        guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw APIError.httpError((resp as? HTTPURLResponse)?.statusCode ?? 0)
-        }
-    }
-
     func fetchAllSongs(limit: Int = 500) async throws -> [MediaItem] {
         try await fetchItems(path: "Users/\(userId)/Items", query: [
             q("IncludeItemTypes", "Audio"),
@@ -208,6 +153,63 @@ class JellyfinAPI: ObservableObject {
         return try JSONDecoder().decode(MediaItem.self, from: data)
     }
 
+    func search(query: String) async throws -> [MediaItem] {
+        try await fetchItems(path: "Users/\(userId)/Items", query: [
+            q("SearchTerm", query),
+            q("IncludeItemTypes", "Audio,MusicAlbum,MusicArtist"),
+            q("Recursive", "true"),
+            q("Limit", "60"),
+            q("Fields", "PrimaryImageAspectRatio,SortName,AlbumArtist,Album,RunTimeTicks,AlbumId"),
+            q("ImageTypeLimit", "1"),
+        ])
+    }
+
+    func fetchLyrics(itemId: String) async throws -> [LyricLine] {
+        guard let req = request("Audio/\(itemId)/Lyrics") else { throw APIError.invalidURL }
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        return try JSONDecoder().decode(LyricResponse.self, from: data).lyrics
+    }
+
+    // MARK: - Playlist editing
+
+    @discardableResult
+    func createPlaylist(name: String, itemIds: [String] = []) async throws -> String {
+        guard let base = baseURL else { throw APIError.invalidURL }
+        var req = URLRequest(url: base.appendingPathComponent("Playlists"))
+        req.httpMethod = "POST"
+        req.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: [
+            "Name": name, "Ids": itemIds, "UserId": userId, "MediaType": "Audio",
+        ])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try ensureOK(resp)
+        return (try? JSONDecoder().decode(CreatePlaylistResult.self, from: data).id) ?? ""
+    }
+
+    func addToPlaylist(_ playlistId: String, itemIds: [String]) async throws {
+        try await sendMutation("Playlists/\(playlistId)/Items", method: "POST",
+                               query: [q("ids", itemIds.joined(separator: ",")), q("userId", userId)])
+    }
+
+    func removeFromPlaylist(_ playlistId: String, entryIds: [String]) async throws {
+        try await sendMutation("Playlists/\(playlistId)/Items", method: "DELETE",
+                               query: [q("entryIds", entryIds.joined(separator: ","))])
+    }
+
+    func deletePlaylist(_ id: String) async throws {
+        try await sendMutation("Items/\(id)", method: "DELETE", query: [])
+    }
+
+    /// Move a playlist entry (its `playlistItemId`) to a new position.
+    func movePlaylistItem(_ playlistId: String, entryId: String, to newIndex: Int) async throws {
+        try await sendMutation("Playlists/\(playlistId)/Items/\(entryId)/Move/\(newIndex)",
+                               method: "POST", query: [])
+    }
+
     // MARK: - Playback reporting (scrobble play state back to Jellyfin)
 
     func reportPlaybackStart(itemId: String, positionTicks: Int64) async {
@@ -234,26 +236,6 @@ class JellyfinAPI: ObservableObject {
             "CanSeek": true,
         ])
         _ = try? await URLSession.shared.data(for: req)
-    }
-
-    func fetchLyrics(itemId: String) async throws -> [LyricLine] {
-        guard let req = request("Audio/\(itemId)/Lyrics") else { throw APIError.invalidURL }
-        let (data, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0)
-        }
-        return try JSONDecoder().decode(LyricResponse.self, from: data).lyrics
-    }
-
-    func search(query: String) async throws -> [MediaItem] {
-        try await fetchItems(path: "Users/\(userId)/Items", query: [
-            q("SearchTerm", query),
-            q("IncludeItemTypes", "Audio,MusicAlbum,MusicArtist"),
-            q("Recursive", "true"),
-            q("Limit", "60"),
-            q("Fields", "PrimaryImageAspectRatio,SortName,AlbumArtist,Album,RunTimeTicks,AlbumId"),
-            q("ImageTypeLimit", "1"),
-        ])
     }
 
     // MARK: - URLs
@@ -296,6 +278,25 @@ class JellyfinAPI: ObservableObject {
             return try JSONDecoder().decode(ItemsResponse.self, from: data).items
         } catch {
             throw APIError.decodingError(error)
+        }
+    }
+
+    private func sendMutation(_ path: String, method: String, query: [URLQueryItem]) async throws {
+        guard let base = baseURL,
+              var comps = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        else { throw APIError.invalidURL }
+        if !query.isEmpty { comps.queryItems = query }
+        guard let url = comps.url else { throw APIError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        try ensureOK(resp)
+    }
+
+    private func ensureOK(_ resp: URLResponse) throws {
+        guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw APIError.httpError((resp as? HTTPURLResponse)?.statusCode ?? 0)
         }
     }
 

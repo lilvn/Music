@@ -1,8 +1,7 @@
 import SwiftUI
 
 struct HomeView: View {
-    @EnvironmentObject var api: JellyfinAPI
-    @EnvironmentObject var player: AudioPlayerManager
+    @Environment(JellyfinClient.self) private var client
 
     @State private var recentlyAdded: [MediaItem] = []
     @State private var recentlyPlayed: [MediaItem] = []
@@ -11,16 +10,14 @@ struct HomeView: View {
     @State private var loaded = false
 
     var body: some View {
-        NavigationStack {
+        LibraryStack {
             GeometryReader { geo in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 30) {
-                        // Featured projects in the skeuomorphic Cover Flow carousel…
                         CoverFlowShelf(title: "Featured",
                                        albums: featured,
                                        topInset: geo.safeAreaInsets.top)
 
-                        // …and the recently added projects in the full-width Featured-style section.
                         if !recentlyAdded.isEmpty {
                             FeaturedShelf(title: "Recently Added", albums: recentlyAdded)
                         }
@@ -33,24 +30,23 @@ struct HomeView: View {
                         if !loaded {
                             ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                         }
-                        Color.clear.miniBarClearance()
                     }
+                    .padding(.bottom, 24)
                 }
                 .scrollIndicators(.hidden)
                 .ignoresSafeArea(edges: .top)
             }
             .toolbar(.hidden, for: .navigationBar)
-            .cardNavigation()
+            .task { await load() }
         }
-        .task { await load() }
     }
 
-    private func load(force: Bool = false) async {
-        guard !loaded || force else { return }
-        async let recent = api.fetchRecentlyAdded(limit: 14)
-        async let played = api.fetchRecentlyPlayed(limit: 16)
-        async let feat = api.fetchFeatured(limit: 8)
-        async let arts = api.fetchArtists(limit: 30)
+    private func load() async {
+        guard !loaded else { return }
+        async let recent = client.fetchRecentlyAdded(limit: 14)
+        async let played = client.fetchRecentlyPlayed(limit: 16)
+        async let feat = client.fetchFeatured(limit: 8)
+        async let arts = client.fetchArtists(limit: 30)
         recentlyAdded = (try? await recent) ?? recentlyAdded
         recentlyPlayed = (try? await played) ?? recentlyPlayed
         featured = (try? await feat) ?? featured
@@ -59,158 +55,7 @@ struct HomeView: View {
     }
 }
 
-// MARK: - Cover Flow Shelf (skeuomorphic iTunes-style, dark band to the top of the page)
-
-struct CoverFlowShelf: View {
-    let title: String
-    let albums: [MediaItem]
-    let topInset: CGFloat
-    @EnvironmentObject var player: AudioPlayerManager
-    private let coverSize: CGFloat = 204
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Text(title)
-                .font(.largeTitle).fontWeight(.bold)
-                .padding(.horizontal, DS.hPad)
-
-            GeometryReader { geo in
-                let center = geo.size.width / 2
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) {
-                        ForEach(albums) { album in
-                            ReflectedCover(album: album, size: coverSize)
-                                .visualEffect { content, proxy in
-                                    let d = proxy.frame(in: .named("coverflow")).midX - center
-                                    let t = max(-1, min(1, d / center))
-                                    return content
-                                        .rotation3DEffect(.degrees(Double(-t) * 55),
-                                                          axis: (x: 0, y: 1, z: 0),
-                                                          anchor: .center, perspective: 0.55)
-                                        .scaleEffect(1 - abs(t) * 0.16)
-                                }
-                                .zIndex(player.currentItem?.albumId == album.id ? 3 : 1)
-                        }
-                    }
-                    .scrollTargetLayout()
-                    .padding(.horizontal, center - coverSize / 2)
-                }
-                .scrollTargetBehavior(.viewAligned)
-                .scrollClipDisabled()
-                .coordinateSpace(.named("coverflow"))
-            }
-            .frame(height: coverSize * 1.5)
-        }
-        .padding(.top, topInset + 34)
-        .padding(.bottom, -6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct ReflectedCover: View {
-    let album: MediaItem
-    let size: CGFloat
-    @EnvironmentObject var api: JellyfinAPI
-    @EnvironmentObject var player: AudioPlayerManager
-
-    private var isCurrent: Bool { player.currentItem?.albumId == album.id }
-
-    @State private var uiImage: UIImage?
-
-    /// Cover + CD composition. Tapping plays the album: the cover slides left while the spinning CD
-    /// slides out from behind it. Rendered twice — upright, and mirrored as the reflection.
-    private var artworkStack: some View {
-        ZStack {
-            SpinningDisc(artURL: api.artworkURL(for: album, size: 400),
-                         size: size * 0.9,
-                         spinning: isCurrent && player.isPlaying)
-                .offset(x: isCurrent ? size * 0.3 : 0)
-                .opacity(isCurrent ? 1 : 0)
-
-            cover(uiImage)
-                .offset(x: isCurrent ? -size * 0.1 : 0)
-        }
-        .frame(width: size, height: size)
-        .animation(.spring(response: 0.55, dampingFraction: 0.74), value: isCurrent)
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            artworkStack
-
-            // Reflection mirrors the WHOLE artwork — the cover AND the spinning CD when it's out —
-            // so the disc keeps its reflection instead of floating untethered.
-            ZStack(alignment: .top) {
-                artworkStack
-                    .scaleEffect(y: -1)
-                    .frame(height: size * 0.5, alignment: .top)
-                    .clipped()
-                    .mask(
-                        LinearGradient(colors: [.white.opacity(0.4), .clear],
-                                       startPoint: .top, endPoint: .bottom)
-                    )
-
-                VStack(spacing: 1) {
-                    Text(album.name)
-                        .font(.caption).fontWeight(.semibold)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Text(album.albumArtist ?? album.primaryArtist)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .padding(.top, 5)
-                .frame(width: size)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { playAlbum() }
-        .frame(width: size)
-        .task(id: album.id) {
-            guard uiImage == nil, let url = api.artworkURL(for: album, size: 600) else { return }
-            if let cached = ImageStore.shared.cached(url) { uiImage = cached }
-            else { uiImage = await ImageStore.shared.load(url, maxPixel: 600) }
-        }
-    }
-
-    private func playAlbum() {
-        Task {
-            let tracks = (try? await api.fetchTracks(parentId: album.id)) ?? []
-            if !tracks.isEmpty { player.play(items: tracks, from: 0, api: api) }
-        }
-    }
-
-    @ViewBuilder
-    private func cover(_ image: UIImage?) -> some View {
-        Group {
-            if let image {
-                Image(uiImage: image).resizable().aspectRatio(1, contentMode: .fill)
-            } else {
-                Color(white: 0.18)
-                    .overlay {
-                        Image(systemName: "music.note")
-                            .font(.title)
-                            .foregroundStyle(.white.opacity(0.3))
-                    }
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .stroke(.white.opacity(0.14), lineWidth: 0.5)
-        )
-        .overlay(alignment: .top) {
-            LinearGradient(colors: [.white.opacity(0.28), .clear],
-                           startPoint: .top, endPoint: .center)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .allowsHitTesting(false)
-        }
-    }
-}
-
-// MARK: - Featured Shelf (full-width paging cards)
+// MARK: - Featured shelf (full-width paging cards) — Recently Added
 
 struct FeaturedShelf: View {
     var title: String = "Featured"
@@ -225,7 +70,7 @@ struct FeaturedShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
                     ForEach(albums) { album in
-                        NavCard(route: .album(album)) {
+                        LibraryLink(route: .album(album)) {
                             FeaturedCard(album: album)
                                 .containerRelativeFrame(.horizontal)
                         }
@@ -241,15 +86,15 @@ struct FeaturedShelf: View {
 
 struct FeaturedCard: View {
     let album: MediaItem
-    @EnvironmentObject var api: JellyfinAPI
+    @Environment(JellyfinClient.self) private var client
 
     var body: some View {
-        let art = api.artworkURL(for: album, size: 400)
+        let art = client.artworkURL(for: album, size: 400)
         HStack(spacing: 16) {
             LibraryImage(url: art, maxPixel: 400) { Color.white.opacity(0.12) }
-            .frame(width: 116, height: 116)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+                .frame(width: 116, height: 116)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(album.name)
@@ -281,11 +126,11 @@ struct FeaturedCard: View {
     }
 }
 
-// MARK: - Artists Shelf (circular avatars)
+// MARK: - Artists shelf (circular avatars)
 
 struct ArtistsShelf: View {
     let artists: [MediaItem]
-    @EnvironmentObject var api: JellyfinAPI
+    @Environment(JellyfinClient.self) private var client
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -296,9 +141,9 @@ struct ArtistsShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(artists) { artist in
-                        NavCard(route: .artist(artist)) {
+                        LibraryLink(route: .artist(artist)) {
                             VStack(spacing: 8) {
-                                LibraryImage(url: api.artworkURL(for: artist, size: 200), maxPixel: 280) {
+                                LibraryImage(url: client.artworkURL(for: artist, size: 200), maxPixel: 280) {
                                     Color(.systemGray5)
                                         .overlay {
                                             Image(systemName: "person.fill")
@@ -325,12 +170,12 @@ struct ArtistsShelf: View {
     }
 }
 
-// MARK: - Recently Played Shelf (horizontal track cards — tap to play)
+// MARK: - Recently played shelf (horizontal track cards — tap to play)
 
 struct RecentlyPlayedShelf: View {
     let tracks: [MediaItem]
-    @EnvironmentObject var api: JellyfinAPI
-    @EnvironmentObject var player: AudioPlayerManager
+    @Environment(JellyfinClient.self) private var client
+    @Environment(Player.self) private var player
     private let cardSize: CGFloat = 132
 
     var body: some View {
@@ -342,9 +187,9 @@ struct RecentlyPlayedShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
                     ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                        Button { player.play(items: tracks, from: index, api: api) } label: {
+                        Button { player.play(items: tracks, from: index) } label: {
                             VStack(alignment: .leading, spacing: 6) {
-                                LibraryImage(url: api.artworkURL(for: track, size: 400), maxPixel: 400) {
+                                LibraryImage(url: client.artworkURL(for: track, size: 400), maxPixel: 400) {
                                     Color(.systemGray6)
                                         .overlay { Image(systemName: "music.note").foregroundStyle(Color(.systemGray4)) }
                                 }

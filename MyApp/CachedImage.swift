@@ -1,6 +1,5 @@
 import SwiftUI
 import ImageIO
-import UniformTypeIdentifiers
 
 /// Decoded-image cache + background downsampler. `AsyncImage` re-decodes full-size images on the
 /// main thread each time a cell appears (janky scrolling, high memory). This decodes ONCE on a
@@ -44,9 +43,9 @@ final class ImageStore {
     }
 }
 
-/// Drop-in efficient replacement for the artwork `AsyncImage`s: instant for cached images, smooth
-/// background decode/downsample for new ones. The `maxPixel` is the largest pixel dimension to
-/// decode to (use the same value passed to `artworkURL(size:)`).
+/// Drop-in efficient replacement for an artwork `AsyncImage`: instant for cached images, smooth
+/// background decode/downsample for new ones. `maxPixel` is the largest pixel dimension to decode
+/// to (use the same value passed to `artworkURL(size:)`).
 struct LibraryImage<Placeholder: View>: View {
     private let url: URL?
     private let maxPixel: CGFloat

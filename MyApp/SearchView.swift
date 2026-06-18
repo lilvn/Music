@@ -1,21 +1,21 @@
 import SwiftUI
 
-/// Content for the iOS 26 `.search`-role tab. The search field itself lives on the `TabView`
-/// (`.searchable`) and morphs the tab bar; this view just renders results for `query`.
-struct SearchResultsView: View {
-    let query: String
-    @EnvironmentObject var api: JellyfinAPI
-    @EnvironmentObject var player: AudioPlayerManager
+/// The search tab's root. Owns the native `.searchable` field (which the `role: .search` tab renders
+/// bottom-anchored and keyboard-adjusting) and renders results for the live query. Result taps push
+/// with the same zoom card-expand as the rest of the app.
+struct SearchView: View {
+    @Environment(JellyfinClient.self) private var client
+    @Environment(Player.self) private var player
 
+    @State private var query = ""
     @State private var results: [MediaItem] = []
     @State private var isSearching = false
-    @State private var pickerTrack: MediaItem?
+    @Namespace private var ns
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
     private var albums:  [MediaItem] { results.filter { $0.type == "MusicAlbum" } }
     private var artists: [MediaItem] { results.filter { $0.type == "MusicArtist" } }
     private var songs:   [MediaItem] { results.filter { $0.type == "Audio" } }
-    private let songDividerLeading: CGFloat = DS.hPad + 46 + 12
 
     var body: some View {
         NavigationStack {
@@ -29,21 +29,25 @@ struct SearchResultsView: View {
                 } else {
                     searchResults
                 }
-                Color.clear.miniBarClearance()
             }
             .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.immediately)
-            .toolbar(.hidden, for: .navigationBar)
-            .cardNavigation()
+            .navigationTitle("Search")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: LibraryRoute.self) { route in
+                destinationView(for: route)
+                    .navigationTransition(.zoom(sourceID: route.id, in: ns))
+            }
         }
-        .sheet(item: $pickerTrack) { PlaylistPickerSheet(track: $0) }
+        .environment(\.zoomNamespace, ns)
+        .searchable(text: $query, prompt: "Artists, Albums, Songs")
         // Re-runs (and cancels the prior run) whenever the query changes — the sleep debounces.
         .task(id: query) {
             guard !trimmed.isEmpty else { results = []; isSearching = false; return }
             isSearching = true
             try? await Task.sleep(for: .milliseconds(280))
             guard !Task.isCancelled else { return }
-            results = (try? await api.search(query: trimmed)) ?? []
+            results = (try? await client.search(query: trimmed)) ?? []
             isSearching = false
         }
     }
@@ -69,7 +73,7 @@ struct SearchResultsView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 40, weight: .ultraLight))
                 .foregroundStyle(.tertiary)
-            Text("No results for \"\(query)\"")
+            Text("No results for “\(query)”")
                 .font(.callout).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
@@ -85,7 +89,7 @@ struct SearchResultsView: View {
             if !artists.isEmpty {
                 sectionLabel("Artists", icon: "person.fill")
                 ForEach(artists) { artist in
-                    NavCard(route: .artist(artist)) {
+                    LibraryLink(route: .artist(artist)) {
                         ArtistRow(artist: artist, large: true)
                     }
                     Divider().padding(.leading, DS.hPad + 66 + 14)
@@ -97,7 +101,7 @@ struct SearchResultsView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: DS.gridSpacing) {
                         ForEach(albums) { album in
-                            NavCard(route: .album(album)) {
+                            LibraryLink(route: .album(album)) {
                                 AlbumCard(album: album).frame(width: 170)
                             }
                         }
@@ -113,18 +117,16 @@ struct SearchResultsView: View {
                 sectionLabel("Songs", icon: "music.note")
                 ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                     SongRow(song: song, showAlbumArt: true,
-                            onTap: { player.play(items: songs, from: index, api: api) },
-                            onPlayNext: { player.playNext(song, api: api) },
-                            onPlayLast: { player.playLast(song, api: api) },
-                            onAddToPlaylist: { pickerTrack = song },
+                            onTap: { player.play(items: songs, from: index) },
                             large: true)
                     if index < songs.count - 1 {
-                        Divider().padding(.leading, songDividerLeading + 10)
+                        Divider().padding(.leading, DS.hPad + 56 + 12)
                     }
                 }
             }
         }
         .padding(.top, 8)
+        .padding(.bottom, 24)
     }
 
     private func sectionLabel(_ title: String, icon: String) -> some View {
@@ -137,5 +139,4 @@ struct SearchResultsView: View {
             .padding(.top, 18)
             .padding(.bottom, 6)
     }
-
 }
