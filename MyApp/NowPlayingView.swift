@@ -1,4 +1,18 @@
 import SwiftUI
+import AVKit
+
+/// System AirPlay / output-route picker (wraps `AVRoutePickerView`).
+struct AirPlayButton: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let v = AVRoutePickerView()
+        v.backgroundColor = .clear
+        v.tintColor = .label
+        v.activeTintColor = .label
+        v.prioritizesVideoDevices = false
+        return v
+    }
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+}
 
 /// Now Playing — a standard sheet that slides up from the bottom and swipes down to close.
 /// Up Next / Lyrics use the same presentation so the close behaviour is consistent.
@@ -162,16 +176,24 @@ struct NowPlayingView: View {
                     .padding(.vertical, 12)
             }
             .matchedTransitionSource(id: "queue", in: sheetZoom)
+            .buttonStyle(.bordered)
+            .tint(.primary)
+
+            AirPlayButton()
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .background(Color(.secondarySystemBackground), in: .capsule)
+
             Button { showLyrics = true } label: {
                 Image(systemName: "quote.bubble")
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
             .matchedTransitionSource(id: "lyrics", in: sheetZoom)
+            .buttonStyle(.bordered)
+            .tint(.primary)
         }
         .font(.title3)
-        .buttonStyle(.bordered)
-        .tint(.primary)
     }
 }
 

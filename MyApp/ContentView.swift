@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreSpotlight
 
 @main struct JellytunesApp: App {
     @StateObject private var api = JellyfinAPI()
@@ -45,9 +46,11 @@ enum AppTab: Hashable, CaseIterable {
 /// bar in its place, bringing up the keyboard. The mini player rides above all of it.
 struct MainTabView: View {
     @EnvironmentObject var player: AudioPlayerManager
+    @EnvironmentObject var api: JellyfinAPI
     @State private var tab: AppTab = .home
     @State private var searching = false
     @State private var searchText = ""
+    @State private var spotlightRoute: LibraryRoute?
     @FocusState private var searchFocused: Bool
     @Namespace private var npZoom
     @Namespace private var tabSel
@@ -79,6 +82,26 @@ struct MainTabView: View {
         .fullScreenCover(isPresented: $player.showNowPlaying) {
             NowPlayingView()
                 .navigationTransition(.zoom(sourceID: "np", in: npZoom))
+        }
+        // Open the detail when the user taps a Spotlight result for this library.
+        .fullScreenCover(item: $spotlightRoute) { route in
+            NavigationStack {
+                destinationView(for: route)
+                    .cardNavigation()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button { spotlightRoute = nil } label: {
+                                Image(systemName: "chevron.down").fontWeight(.semibold)
+                            }
+                            .tint(.primary)
+                        }
+                    }
+            }
+        }
+        .task { await SpotlightIndexer.reindex(api) }
+        .onContinueUserActivity(CSSearchableItemActionType) { activity in
+            guard let id = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return }
+            Task { spotlightRoute = await SpotlightIndexer.route(forIdentifier: id, api: api) }
         }
     }
 
