@@ -25,6 +25,12 @@
   - "Play recently played in Jellytunes"
   - "Add this to <playlist> in Jellytunes"
   Build/metadata verified. Full hands-free Siri phrasing should be confirmed on a device.
+- **Gapless playback** — engine migrated to `AVQueuePlayer` with a pre-rolled lookahead item,
+  so track→track transitions have no gap. Verified in the simulator (gapless auto-advance,
+  instant manual next, previous-to-prior-track, seek, play/pause, shuffle, queue edits).
+- **Performance** — artwork now decodes/downsamples ONCE on a background thread and is cached
+  (`LibraryImage`/`ImageStore`) instead of `AsyncImage` re-decoding on the main thread per cell,
+  so scrolling is smoother and memory lower; Spotlight re-index throttled to ~6h.
 
 ## Needs you / a device (not done autonomously, with reasons)
 - **CarPlay** — requires the `com.apple.developer.carplay-audio` entitlement, which **Apple
