@@ -6,6 +6,7 @@ struct AlbumDetailView: View {
     @Environment(Player.self) private var player
     @State private var tracks: [MediaItem] = []
     @State private var isLoading = true
+    @State private var pickerTrack: MediaItem?
 
     var body: some View {
         List {
@@ -30,9 +31,14 @@ struct AlbumDetailView: View {
                             let idx = tracks.firstIndex { $0.id == track.id } ?? 0
                             SongRow(song: track, showAlbumArt: false,
                                     trackNumber: track.indexNumber ?? (discPos + 1),
-                                    onTap: { player.play(items: tracks, from: idx) })
+                                    onTap: { player.play(items: tracks, from: idx) },
+                                    onPlayNext: { player.playNext(track) },
+                                    onPlayLast: { player.playLast(track) },
+                                    onAddToPlaylist: { pickerTrack = track })
                                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                                 .listRowBackground(Color.clear)
+                                .trackSwipeActions(onPlayNext: { player.playNext(track) },
+                                                   onPlayLast: { player.playLast(track) })
                         }
                     } header: {
                         if sorted.count > 1 {
@@ -48,6 +54,7 @@ struct AlbumDetailView: View {
         .listStyle(.plain)
         .scrollIndicators(.hidden)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $pickerTrack) { PlaylistPickerSheet(track: $0) }
         .task {
             tracks = (try? await client.fetchTracks(parentId: album.id)) ?? []
             isLoading = false
@@ -58,10 +65,21 @@ struct AlbumDetailView: View {
         VStack(spacing: 0) {
             artwork
             metadata.padding(.top, 18)
-            playButton.padding(.vertical, 18)
+            playRow.padding(.vertical, 18)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
+    }
+
+    /// Play pill flanked by round "play next" (left) and "add to queue" (right).
+    private var playRow: some View {
+        HStack(spacing: 16) {
+            QueueActionButton(icon: "text.line.first.and.arrowtriangle.forward",
+                              disabled: tracks.isEmpty) { player.playNext(tracks) }
+            playButton
+            QueueActionButton(icon: "text.line.last.and.arrowtriangle.forward",
+                              disabled: tracks.isEmpty) { player.playLast(tracks) }
+        }
     }
 
     private var artwork: some View {

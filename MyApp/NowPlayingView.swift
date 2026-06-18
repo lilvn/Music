@@ -7,6 +7,7 @@ struct NowPlayingView: View {
     @Environment(Player.self) private var player
     @Environment(JellyfinClient.self) private var client
     @Environment(\.dismiss) private var dismiss
+    @State private var showQueue = false
 
     private var seed: Int {
         (player.currentItem?.id ?? "x").unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
@@ -33,7 +34,7 @@ struct NowPlayingView: View {
             Spacer(minLength: 24)
             mainControls
             Spacer(minLength: 26)
-            shuffleRepeatRow
+            bottomRow
             Spacer(minLength: 10)
         }
         .padding(.horizontal, 28)
@@ -41,6 +42,11 @@ struct NowPlayingView: View {
         .padding(.bottom, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { Color(.systemBackground).ignoresSafeArea() }
+        .sheet(isPresented: $showQueue) {
+            UpNextView()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
     }
 
     private var grabber: some View {
@@ -118,9 +124,17 @@ struct NowPlayingView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var shuffleRepeatRow: some View {
+    private var bottomRow: some View {
         HStack(spacing: 14) {
             toggle(system: "shuffle", active: player.queue.isShuffled) { player.toggleShuffle() }
+            Button { showQueue = true } label: {
+                Image(systemName: "list.bullet")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 54, height: 54)
+                    .background(Color(.secondarySystemBackground), in: .circle)
+            }
+            .buttonStyle(ScaleButtonStyle())
             toggle(system: player.queue.repeatMode.systemImage,
                    active: player.queue.repeatMode.isActive) { player.cycleRepeat() }
         }

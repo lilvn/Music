@@ -73,10 +73,9 @@ private struct MatchedSourceIfAvailable: ViewModifier {
 @ViewBuilder
 func destinationView(for route: LibraryRoute) -> some View {
     switch route {
-    case .album(let album):   AlbumDetailView(album: album)
-    case .artist(let artist): ArtistDetailView(artist: artist)
-    case .playlist:           // Playlists land in Phase 2.
-        ContentUnavailableView("Coming soon", systemImage: "music.note.list")
+    case .album(let album):       AlbumDetailView(album: album)
+    case .artist(let artist):     ArtistDetailView(artist: artist)
+    case .playlist(let playlist): PlaylistDetailView(playlist: playlist)
     }
 }
 
@@ -175,6 +174,10 @@ struct SongRow: View {
     /// still show a number. Falls back to the item's own index.
     var trackNumber: Int? = nil
     let onTap: () -> Void
+    var onPlayNext: (() -> Void)? = nil
+    var onPlayLast: (() -> Void)? = nil
+    var onAddToPlaylist: (() -> Void)? = nil
+    var onRemove: (() -> Void)? = nil
     var large: Bool = false
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
@@ -192,6 +195,20 @@ struct SongRow: View {
         .frame(minHeight: large ? 68 : 56)
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
+        .contextMenu {
+            if let onPlayNext {
+                Button { onPlayNext() } label: { Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward") }
+            }
+            if let onPlayLast {
+                Button { onPlayLast() } label: { Label("Play Last", systemImage: "text.line.last.and.arrowtriangle.forward") }
+            }
+            if let onAddToPlaylist {
+                Button { onAddToPlaylist() } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }
+            }
+            if let onRemove {
+                Button(role: .destructive) { onRemove() } label: { Label("Remove from Playlist", systemImage: "minus.circle") }
+            }
+        }
     }
 
     @ViewBuilder
@@ -247,6 +264,65 @@ struct SongRow: View {
                 .foregroundStyle(.tertiary)
                 .monospacedDigit()
         }
+    }
+}
+
+// MARK: - Track swipe actions (native, monochrome — full-swipe plays next)
+
+extension View {
+    /// Trailing swipe → Play Next (full-swipe) / Play Last; optional leading swipe → Remove.
+    @ViewBuilder
+    func trackSwipeActions(onPlayNext: (() -> Void)?,
+                           onPlayLast: (() -> Void)?,
+                           onRemove: (() -> Void)? = nil) -> some View {
+        self
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                if let onPlayNext {
+                    Button { onPlayNext() } label: {
+                        Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                    }
+                    .tint(Color(.systemGray2))
+                }
+                if let onPlayLast {
+                    Button { onPlayLast() } label: {
+                        Image(systemName: "text.line.last.and.arrowtriangle.forward")
+                    }
+                    .tint(Color(.systemGray3))
+                }
+            }
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                if let onRemove {
+                    Button(role: .destructive) { onRemove() } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                }
+            }
+    }
+}
+
+// MARK: - Queue action button (round secondary action beside the Play pill)
+
+struct QueueActionButton: View {
+    let icon: String
+    var disabled: Bool = false
+    let action: () -> Void
+    @State private var bump = false
+
+    var body: some View {
+        Button {
+            action()
+            bump.toggle()
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 52, height: 52)
+                .background(Color(.secondarySystemBackground), in: .circle)
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .disabled(disabled)
+        .opacity(disabled ? 0.4 : 1)
+        .sensoryFeedback(.impact(weight: .light), trigger: bump)
     }
 }
 

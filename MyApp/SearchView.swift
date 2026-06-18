@@ -10,6 +10,7 @@ struct SearchView: View {
     @State private var query = ""
     @State private var results: [MediaItem] = []
     @State private var isSearching = false
+    @State private var pickerTrack: MediaItem?
     @Namespace private var ns
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
@@ -40,6 +41,7 @@ struct SearchView: View {
             }
         }
         .environment(\.zoomNamespace, ns)
+        .sheet(item: $pickerTrack) { PlaylistPickerSheet(track: $0) }
         .searchable(text: $query, prompt: "Artists, Albums, Songs")
         // Re-runs (and cancels the prior run) whenever the query changes — the sleep debounces.
         .task(id: query) {
@@ -118,6 +120,9 @@ struct SearchView: View {
                 ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                     SongRow(song: song, showAlbumArt: true,
                             onTap: { player.play(items: songs, from: index) },
+                            onPlayNext: { player.playNext(song) },
+                            onPlayLast: { player.playLast(song) },
+                            onAddToPlaylist: { pickerTrack = song },
                             large: true)
                     if index < songs.count - 1 {
                         Divider().padding(.leading, DS.hPad + 56 + 12)

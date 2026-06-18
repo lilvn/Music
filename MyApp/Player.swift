@@ -6,9 +6,10 @@ import Observation
 import MediaPlayer
 #endif
 
-/// Audio playback engine. PHASE 1: a single `AVPlayer` that advances on item-end. The public API
-/// is final so Phase 2 can swap in the gapless `AVQueuePlayer` lookahead engine with zero call-site
-/// changes. The `JellyfinClient` is stored at init, so play methods take no `api:` parameter.
+/// Audio playback engine. PHASE 2: a gapless `AVQueuePlayer` that always holds the current item plus
+/// a pre-rolled "lookahead" (next) item, so one track hands off to the next with no gap. The public
+/// API is unchanged from Phase 1 — the engine swap is entirely internal. The `JellyfinClient` is
+/// stored at init, so play methods take no `api:` parameter.
 @MainActor
 @Observable
 final class Player {
@@ -29,11 +30,17 @@ final class Player {
     var currentItem: MediaItem? { queue.currentItem }
 
     @ObservationIgnored private let client: JellyfinClient
-    @ObservationIgnored private var player: AVPlayer?
+
+    // GAPLESS ENGINE: the AVQueuePlayer holds the current item + a pre-rolled lookahead (next) item.
+    // Manual next/prev, seek, shuffle, queue edits, and repeat are driven by re-syncing that window.
+    @ObservationIgnored private var player: AVQueuePlayer?
     @ObservationIgnored private var currentPlayerItem: AVPlayerItem?
+    @ObservationIgnored private var lookaheadItem: AVPlayerItem?
+    @ObservationIgnored private var lookaheadIndex: Int?
 
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var statusObservation: NSKeyValueObservation?
+    @ObservationIgnored private var currentItemObservation: NSKeyValueObservation?
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var notificationObservers: [NSObjectProtocol] = []
 
@@ -73,13 +80,13 @@ final class Player {
             queue.currentIndex = min(max(index, 0), items.count - 1)
             queue.isShuffled = false
         }
-        loadAndPlay(at: queue.currentIndex, autoplay: true)
+        rebuild(at: queue.currentIndex, autoplay: true)
     }
 
     /// Jump to an existing item in the current queue (e.g. tapping in the Up Next list).
     func play(at index: Int) {
         guard queue.items.indices.contains(index) else { return }
-        loadAndPlay(at: index, autoplay: true)
+        rebuild(at: index, autoplay: true)
     }
 
     func togglePlayPause() {
@@ -109,17 +116,25 @@ final class Player {
     }
 
     func nextTrack() {
-        guard let n = nextIndex(after: queue.currentIndex) else { return }
-        loadAndPlay(at: n, autoplay: intendedPlaying || isPlaying)
+        guard let player else { return }
+        // If the next track is already pre-rolled, advance to it instantly; otherwise rebuild.
+        if let n = nextIndex(after: queue.currentIndex) {
+            if let look = lookaheadItem, lookaheadIndex == n {
+                player.advanceToNextItem()
+                didAdvance(to: look, index: n)   // sync so an immediate prev/next sees the new index
+            } else {
+                rebuild(at: n, autoplay: intendedPlaying || isPlaying)
+            }
+        }
     }
 
     func previousTrack() {
         if currentTime > 5 {
             seek(to: 0)
         } else if queue.currentIndex > 0 {
-            loadAndPlay(at: queue.currentIndex - 1, autoplay: intendedPlaying || isPlaying)
+            rebuild(at: queue.currentIndex - 1, autoplay: intendedPlaying || isPlaying)
         } else if queue.repeatMode == .all, !queue.items.isEmpty {
-            loadAndPlay(at: queue.items.count - 1, autoplay: intendedPlaying || isPlaying)
+            rebuild(at: queue.items.count - 1, autoplay: intendedPlaying || isPlaying)
         } else {
             seek(to: 0)
         }
@@ -130,7 +145,10 @@ final class Player {
 
     func toggleShuffle() { setShuffle(!queue.isShuffled) }
 
-    func cycleRepeat() { queue.repeatMode.cycle() }
+    func cycleRepeat() {
+        queue.repeatMode.cycle()
+        syncRepeatMode()
+    }
 
     func stop() {
         reportStop()
@@ -142,6 +160,51 @@ final class Player {
         currentTime = 0
         duration = 0
         clearNowPlayingInfo()
+    }
+
+    // MARK: - Queue editing (Up Next)
+
+    /// Insert a track right after the current one.
+    func playNext(_ item: MediaItem) {
+        guard !queue.items.isEmpty else { play(items: [item]); return }
+        queue.items.insert(item, at: min(queue.currentIndex + 1, queue.items.count))
+        if !queue.isShuffled { queue.originalItems = queue.items }
+        resyncLookahead()
+    }
+
+    /// Append a track to the end of the queue.
+    func playLast(_ item: MediaItem) {
+        guard !queue.items.isEmpty else { play(items: [item]); return }
+        queue.items.append(item)
+        if !queue.isShuffled { queue.originalItems = queue.items }
+        resyncLookahead()
+    }
+
+    /// Insert a whole set of tracks (an album/playlist) right after the current track.
+    func playNext(_ items: [MediaItem]) {
+        guard !items.isEmpty else { return }
+        guard !queue.items.isEmpty else { play(items: items); return }
+        queue.items.insert(contentsOf: items, at: min(queue.currentIndex + 1, queue.items.count))
+        if !queue.isShuffled { queue.originalItems = queue.items }
+        resyncLookahead()
+    }
+
+    /// Append a whole set of tracks (an album/playlist) to the end of the queue.
+    func playLast(_ items: [MediaItem]) {
+        guard !items.isEmpty else { return }
+        guard !queue.items.isEmpty else { play(items: items); return }
+        queue.items.append(contentsOf: items)
+        if !queue.isShuffled { queue.originalItems = queue.items }
+        resyncLookahead()
+    }
+
+    /// Remove an item from Up Next. The currently playing track can't be removed.
+    func removeFromQueue(at index: Int) {
+        guard queue.items.indices.contains(index), index != queue.currentIndex else { return }
+        let removed = queue.items.remove(at: index)
+        if index < queue.currentIndex { queue.currentIndex -= 1 }
+        queue.originalItems.removeAll { $0.id == removed.id }
+        resyncLookahead()
     }
 
     // MARK: - Scrubbing (pause while the user holds the playhead)
@@ -184,12 +247,13 @@ final class Player {
                 queue.currentIndex = idx
             }
         }
-        // The current track keeps playing; only the upcoming order changes.
+        // The current track keeps playing; only the pre-rolled next changes.
+        resyncLookahead()
     }
 
-    // MARK: - Engine (single-player; Phase 2 swaps this for the gapless queue)
+    // MARK: - Gapless engine
 
-    /// What plays after index `i` (nil = nothing, e.g. end of queue or repeat-one).
+    /// What plays after index `i` (nil = nothing to pre-roll, e.g. end of queue or repeat-one).
     private func nextIndex(after i: Int) -> Int? {
         if queue.repeatMode == .one { return nil }                      // loop handled on item end
         if i + 1 < queue.items.count { return i + 1 }
@@ -197,38 +261,80 @@ final class Player {
         return nil
     }
 
-    private func loadAndPlay(at index: Int, autoplay: Bool) {
-        guard queue.items.indices.contains(index),
-              let url = client.streamURL(for: queue.items[index]) else { return }
+    private func makeItem(forIndex i: Int, immediate: Bool) -> AVPlayerItem? {
+        guard queue.items.indices.contains(i), let url = client.streamURL(for: queue.items[i]) else { return nil }
+        let item = AVPlayerItem(url: url)
+        // The immediate item starts fast on a low buffer; lookahead items keep the default
+        // (automatic) buffering so they're pre-rolled and ready for a gapless hand-off.
+        if immediate { item.preferredForwardBufferDuration = 1 }
+        return item
+    }
+
+    /// Tear down any existing player and build a fresh queue window starting at `index`.
+    private func rebuild(at index: Int, autoplay: Bool) {
+        guard queue.items.indices.contains(index), let cur = makeItem(forIndex: index, immediate: true) else { return }
         reportStop()
+        teardownPlayer()
+        activateAudioSession()
 
         queue.currentIndex = index
         currentTime = 0
         duration = 0
         isLoading = true
-        isPlaying = false           // observeStatus starts it once the item is ready
+        isPlaying = false        // fresh player — let observeStatus start it once the item is ready
         intendedPlaying = autoplay
 
-        let item = AVPlayerItem(url: url)
-        item.preferredForwardBufferDuration = 1     // start fast on a low buffer
-        currentPlayerItem = item
-        observeEnd(of: item)
-
-        activateAudioSession()
-        if let player {
-            player.replaceCurrentItem(with: item)
-        } else {
-            let p = AVPlayer(playerItem: item)
-            p.automaticallyWaitsToMinimizeStalling = true
-            player = p
-            addTimeObserver(to: p)
+        var items = [cur]
+        currentPlayerItem = cur
+        lookaheadItem = nil
+        lookaheadIndex = nil
+        if let n = nextIndex(after: index), let next = makeItem(forIndex: n, immediate: false) {
+            items.append(next)
+            lookaheadItem = next
+            lookaheadIndex = n
         }
-        observeStatus(of: item)
+
+        let qp = AVQueuePlayer(items: items)
+        // Let the player wait/buffer to avoid stalls — required so seeking to an unbuffered spot
+        // (and gapless pre-roll of the next item) work reliably.
+        qp.automaticallyWaitsToMinimizeStalling = true
+        qp.actionAtItemEnd = (queue.repeatMode == .one) ? .none : .advance
+        player = qp
+
+        setupObservers(on: qp)
+        observeStatus(of: cur)
         updateNowPlayingInfo()
     }
 
-    private func addTimeObserver(to player: AVPlayer) {
-        timeObserver = player.addPeriodicTimeObserver(
+    /// Make sure the next track is pre-rolled into the queue for a gapless hand-off.
+    private func ensureLookahead() {
+        guard let player, lookaheadItem == nil else { return }
+        guard let n = nextIndex(after: queue.currentIndex),
+              let item = makeItem(forIndex: n, immediate: false),
+              let cur = currentPlayerItem,
+              player.canInsert(item, after: cur) else { return }
+        player.insert(item, after: cur)
+        lookaheadItem = item
+        lookaheadIndex = n
+    }
+
+    /// Drop the pre-rolled next and re-derive it (after a queue mutation / shuffle / repeat change).
+    private func resyncLookahead() {
+        guard let player, let cur = currentPlayerItem else { return }
+        for item in player.items() where item !== cur { player.remove(item) }
+        lookaheadItem = nil
+        lookaheadIndex = nil
+        ensureLookahead()
+    }
+
+    private func syncRepeatMode() {
+        player?.actionAtItemEnd = (queue.repeatMode == .one) ? .none : .advance
+        resyncLookahead()
+    }
+
+    private func setupObservers(on qp: AVQueuePlayer) {
+        // Periodic time updates (fires on .main, so run synchronously on the main actor).
+        timeObserver = qp.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
         ) { [weak self] time in
             MainActor.assumeIsolated {
@@ -241,6 +347,28 @@ final class Player {
                 self.updateNowPlayingElapsed()
                 self.progressTick += 1
                 if self.progressTick % 20 == 0 { self.reportProgress(paused: false) }   // ~every 10s
+            }
+        }
+
+        // The current item changing means the player advanced to the pre-rolled next (gapless),
+        // or ran out of items. KVO can fire off the main thread, so hop to the main actor.
+        currentItemObservation = qp.observe(\.currentItem, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in self?.currentItemChanged() }
+        }
+
+        // For repeat-one we don't pre-roll a next item; loop the current one when it ends.
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main
+        ) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self,
+                      self.queue.repeatMode == .one,
+                      let item = note.object as? AVPlayerItem,
+                      item === self.currentPlayerItem else { return }
+                self.player?.seek(to: .zero)
+                self.player?.play()
+                self.isPlaying = true
+                self.currentTime = 0
             }
         }
     }
@@ -270,43 +398,66 @@ final class Player {
         }
     }
 
-    private func observeEnd(of item: AVPlayerItem) {
-        if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
-        endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.handleItemEnd() }
+    private func currentItemChanged() {
+        guard let player else { return }
+        guard let cur = player.currentItem else {
+            handleQueueEnd()
+            return
+        }
+        guard cur !== currentPlayerItem else { return }   // no real change (e.g. handled by a sync skip)
+
+        if cur === lookaheadItem, let n = lookaheadIndex {
+            didAdvance(to: cur, index: n)       // gapless advance into the pre-rolled next track
+        } else {
+            // Unexpected item (defensive) — adopt it without losing the queue index.
+            currentPlayerItem = cur
+            observeStatus(of: cur)
         }
     }
 
-    private func handleItemEnd() {
-        if queue.repeatMode == .one {
-            seek(to: 0)
-            player?.play()
-            isPlaying = true
-            return
-        }
-        if let n = nextIndex(after: queue.currentIndex) {
-            loadAndPlay(at: n, autoplay: true)
-        } else {
-            // Whole queue finished → reset to the top, paused and ready to replay.
-            reportStop()
-            isPlaying = false
-            intendedPlaying = false
-            loadAndPlay(at: 0, autoplay: false)
-        }
+    /// Commit a hand-off to `item` (queue index `index`) — used by both the gapless auto-advance and
+    /// a manual next, so the queue index updates synchronously and stays consistent.
+    private func didAdvance(to item: AVPlayerItem, index: Int) {
+        reportStop()                           // close out the previous track at its current position
+        currentPlayerItem = item
+        lookaheadItem = nil
+        lookaheadIndex = nil
+        queue.currentIndex = index
+        currentTime = 0
+        duration = readyDuration(item)
+        reportStart()
+        updateNowPlayingInfo()
+        observeStatus(of: item)                // refresh duration once fully ready
+        ensureLookahead()                      // pre-roll the following track
+    }
+
+    private func handleQueueEnd() {
+        // Whole queue finished (repeat off) → reset to the top, paused and ready to replay.
+        reportStop()
+        isPlaying = false
+        intendedPlaying = false
+        queue.currentIndex = 0
+        rebuild(at: 0, autoplay: false)
+    }
+
+    private func readyDuration(_ item: AVPlayerItem) -> Double {
+        let d = item.duration.seconds
+        return (d.isFinite && !d.isNaN && d > 0) ? d : 0
     }
 
     private func teardownPlayer() {
         if let obs = timeObserver { player?.removeTimeObserver(obs) }
         timeObserver = nil
         statusObservation?.invalidate(); statusObservation = nil
+        currentItemObservation?.invalidate(); currentItemObservation = nil
         if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
         endObserver = nil
         player?.pause()
-        player?.replaceCurrentItem(with: nil)
+        player?.removeAllItems()
         player = nil
         currentPlayerItem = nil
+        lookaheadItem = nil
+        lookaheadIndex = nil
     }
 
     // MARK: - Audio session
