@@ -93,17 +93,13 @@ struct PlaylistCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            AsyncImage(url: api.artworkURL(for: playlist, size: 600)) { phase in
-                if case .success(let img) = phase {
-                    img.resizable().aspectRatio(1, contentMode: .fill)
-                } else {
-                    Color(.systemGray6)
-                        .overlay {
-                            Image(systemName: "music.note.list")
-                                .font(.title2)
-                                .foregroundStyle(Color(.systemGray4))
-                        }
-                }
+            LibraryImage(url: api.artworkURL(for: playlist, size: 400), maxPixel: 400) {
+                Color(.systemGray6)
+                    .overlay {
+                        Image(systemName: "music.note.list")
+                            .font(.title2)
+                            .foregroundStyle(Color(.systemGray4))
+                    }
             }
             .aspectRatio(1, contentMode: .fit)
             .frame(maxWidth: .infinity)
@@ -210,17 +206,13 @@ struct PlaylistDetailView: View {
 
     private var header: some View {
         VStack(spacing: 12) {
-            AsyncImage(url: api.artworkURL(for: playlist, size: 800)) { phase in
-                if case .success(let img) = phase {
-                    img.resizable().aspectRatio(1, contentMode: .fill)
-                } else {
-                    Color(.systemGray6)
-                        .overlay {
-                            Image(systemName: "music.note.list")
-                                .font(.system(size: 60, weight: .ultraLight))
-                                .foregroundStyle(Color(.systemGray4))
-                        }
-                }
+            LibraryImage(url: api.artworkURL(for: playlist, size: 600), maxPixel: 600) {
+                Color(.systemGray6)
+                    .overlay {
+                        Image(systemName: "music.note.list")
+                            .font(.system(size: 60, weight: .ultraLight))
+                            .foregroundStyle(Color(.systemGray4))
+                    }
             }
             .frame(width: 220, height: 220)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -303,13 +295,9 @@ struct PlaylistPickerSheet: View {
                     ForEach(playlists) { pl in
                         Button { add(to: pl.id) } label: {
                             HStack(spacing: 12) {
-                                AsyncImage(url: api.artworkURL(for: pl, size: 100)) { phase in
-                                    if case .success(let img) = phase {
-                                        img.resizable().aspectRatio(1, contentMode: .fill)
-                                    } else {
-                                        Color(.systemGray6).overlay {
-                                            Image(systemName: "music.note.list").foregroundStyle(.tertiary)
-                                        }
+                                LibraryImage(url: api.artworkURL(for: pl, size: 100), maxPixel: 160) {
+                                    Color(.systemGray6).overlay {
+                                        Image(systemName: "music.note.list").foregroundStyle(.tertiary)
                                     }
                                 }
                                 .frame(width: 44, height: 44)

@@ -8,8 +8,13 @@ import UniformTypeIdentifiers
 enum SpotlightIndexer {
     static let domain = "com.jellytunes.library"
 
-    /// Re-index the whole library. Cheap to call on launch; replaces the previous index.
+    /// Re-index the whole library. Throttled to ~once every 6 hours so it doesn't run a big fetch
+    /// on every launch (and doesn't compete with the initial UI load).
     static func reindex(_ api: JellyfinAPI) async {
+        let key = "spotlightLastIndex"
+        if let last = UserDefaults.standard.object(forKey: key) as? Date,
+           Date().timeIntervalSince(last) < 6 * 3600 { return }
+
         let albums = (try? await api.fetchAlbums(limit: 500)) ?? []
         let artists = (try? await api.fetchArtists(limit: 300)) ?? []
         let playlists = (try? await api.fetchPlaylists()) ?? []
@@ -23,6 +28,7 @@ enum SpotlightIndexer {
         let index = CSSearchableIndex.default()
         try? await index.deleteSearchableItems(withDomainIdentifiers: [domain])
         try? await index.indexSearchableItems(items)
+        UserDefaults.standard.set(Date(), forKey: "spotlightLastIndex")
     }
 
     private static func make(_ item: MediaItem, kind: String, subtitle: String) -> CSSearchableItem {

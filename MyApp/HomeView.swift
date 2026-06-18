@@ -115,13 +115,9 @@ struct ReflectedCover: View {
 
     private var isCurrent: Bool { player.currentItem?.albumId == album.id }
 
-    var body: some View {
-        AsyncImage(url: api.artworkURL(for: album, size: 600)) { phase in
-            let image: Image? = {
-                if case .success(let img) = phase { return img }
-                return nil
-            }()
+    @State private var uiImage: UIImage?
 
+    var body: some View {
             VStack(spacing: 0) {
                 // Tapping plays the album: the cover slides left while a CD slides out from
                 // behind it to the right and spins.
@@ -132,7 +128,7 @@ struct ReflectedCover: View {
                         .offset(x: isCurrent ? size * 0.3 : 0)
                         .opacity(isCurrent ? 1 : 0)
 
-                    cover(image)
+                    cover(uiImage)
                         .offset(x: isCurrent ? -size * 0.1 : 0)
                 }
                 .frame(width: size, height: size)
@@ -141,7 +137,7 @@ struct ReflectedCover: View {
                 // Reflection with the title/artist floating in front of it, close to the cover.
                 // It slides left in sync with the cover so it tracks the now-playing state.
                 ZStack(alignment: .top) {
-                    cover(image)
+                    cover(uiImage)
                         .scaleEffect(y: -1)
                         .frame(height: size * 0.5, alignment: .top)
                         .clipped()
@@ -168,8 +164,12 @@ struct ReflectedCover: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { playAlbum() }
-        }
-        .frame(width: size)
+            .frame(width: size)
+            .task(id: album.id) {
+                guard uiImage == nil, let url = api.artworkURL(for: album, size: 600) else { return }
+                if let cached = ImageStore.shared.cached(url) { uiImage = cached }
+                else { uiImage = await ImageStore.shared.load(url, maxPixel: 600) }
+            }
     }
 
     private func playAlbum() {
@@ -180,10 +180,10 @@ struct ReflectedCover: View {
     }
 
     @ViewBuilder
-    private func cover(_ image: Image?) -> some View {
+    private func cover(_ image: UIImage?) -> some View {
         Group {
             if let image {
-                image.resizable().aspectRatio(1, contentMode: .fill)
+                Image(uiImage: image).resizable().aspectRatio(1, contentMode: .fill)
             } else {
                 Color(white: 0.18)
                     .overlay {
@@ -242,15 +242,9 @@ struct FeaturedCard: View {
     @EnvironmentObject var api: JellyfinAPI
 
     var body: some View {
-        let art = api.artworkURL(for: album, size: 600)
+        let art = api.artworkURL(for: album, size: 400)
         HStack(spacing: 16) {
-            AsyncImage(url: art) { phase in
-                if case .success(let img) = phase {
-                    img.resizable().aspectRatio(1, contentMode: .fill)
-                } else {
-                    Color.white.opacity(0.12)
-                }
-            }
+            LibraryImage(url: art, maxPixel: 400) { Color.white.opacity(0.12) }
             .frame(width: 116, height: 116)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
@@ -271,14 +265,8 @@ struct FeaturedCard: View {
         .frame(maxWidth: .infinity)
         .background {
             ZStack {
-                AsyncImage(url: art) { phase in
-                    if case .success(let img) = phase {
-                        img.resizable().aspectRatio(contentMode: .fill)
-                    } else {
-                        Color(white: 0.15)
-                    }
-                }
-                .blur(radius: 28)
+                LibraryImage(url: art, maxPixel: 400) { Color(white: 0.15) }
+                    .blur(radius: 28)
                 LinearGradient(colors: [.black.opacity(0.45), .black.opacity(0.7)],
                                startPoint: .top, endPoint: .bottom)
             }
@@ -308,17 +296,13 @@ struct ArtistsShelf: View {
                     ForEach(artists) { artist in
                         NavCard(route: .artist(artist)) {
                             VStack(spacing: 8) {
-                                AsyncImage(url: api.artworkURL(for: artist, size: 200)) { phase in
-                                    if case .success(let img) = phase {
-                                        img.resizable().aspectRatio(1, contentMode: .fill)
-                                    } else {
-                                        Color(.systemGray5)
-                                            .overlay {
-                                                Image(systemName: "person.fill")
-                                                    .font(.title)
-                                                    .foregroundStyle(Color(.systemGray3))
-                                            }
-                                    }
+                                LibraryImage(url: api.artworkURL(for: artist, size: 200), maxPixel: 280) {
+                                    Color(.systemGray5)
+                                        .overlay {
+                                            Image(systemName: "person.fill")
+                                                .font(.title)
+                                                .foregroundStyle(Color(.systemGray3))
+                                        }
                                 }
                                 .frame(width: 92, height: 92)
                                 .clipShape(Circle())
@@ -358,13 +342,9 @@ struct RecentlyPlayedShelf: View {
                     ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
                         Button { player.play(items: tracks, from: index, api: api) } label: {
                             VStack(alignment: .leading, spacing: 6) {
-                                AsyncImage(url: api.artworkURL(for: track, size: 400)) { phase in
-                                    if case .success(let img) = phase {
-                                        img.resizable().aspectRatio(1, contentMode: .fill)
-                                    } else {
-                                        Color(.systemGray6)
-                                            .overlay { Image(systemName: "music.note").foregroundStyle(Color(.systemGray4)) }
-                                    }
+                                LibraryImage(url: api.artworkURL(for: track, size: 400), maxPixel: 400) {
+                                    Color(.systemGray6)
+                                        .overlay { Image(systemName: "music.note").foregroundStyle(Color(.systemGray4)) }
                                 }
                                 .frame(width: cardSize, height: cardSize)
                                 .clipShape(RoundedRectangle(cornerRadius: DS.cornerCard, style: .continuous))

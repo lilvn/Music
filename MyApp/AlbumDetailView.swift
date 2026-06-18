@@ -88,17 +88,13 @@ struct AlbumDetailView: View {
     }
 
     private var artwork: some View {
-        AsyncImage(url: api.artworkURL(for: album, size: 800)) { phase in
-            if case .success(let img) = phase {
-                img.resizable().aspectRatio(1, contentMode: .fill)
-            } else {
-                Color(.secondarySystemBackground)
-                    .overlay {
-                        Image(systemName: "music.note")
-                            .font(.system(size: 64, weight: .ultraLight))
-                            .foregroundStyle(.tertiary)
-                    }
-            }
+        LibraryImage(url: api.artworkURL(for: album, size: 600), maxPixel: 600) {
+            Color(.secondarySystemBackground)
+                .overlay {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 64, weight: .ultraLight))
+                        .foregroundStyle(.tertiary)
+                }
         }
         .frame(width: 240, height: 240)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))

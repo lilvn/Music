@@ -81,18 +81,13 @@ struct NowPlayingView: View {
     }
 
     private var albumArt: some View {
-        AsyncImage(url: api.artworkURL(for: player.currentItem ?? .placeholder, size: 1200)) { phase in
-            switch phase {
-            case .success(let img):
-                img.resizable().aspectRatio(1, contentMode: .fill)
-            default:
-                Color(.secondarySystemBackground)
-                    .overlay {
-                        Image(systemName: "music.note")
-                            .font(.system(size: 64, weight: .ultraLight))
-                            .foregroundStyle(.tertiary)
-                    }
-            }
+        LibraryImage(url: api.artworkURL(for: player.currentItem ?? .placeholder, size: 1000), maxPixel: 1000) {
+            Color(.secondarySystemBackground)
+                .overlay {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 64, weight: .ultraLight))
+                        .foregroundStyle(.tertiary)
+                }
         }
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: .infinity)
@@ -444,12 +439,8 @@ struct QueueSheet: View {
     private func row(index: Int, item: MediaItem) -> some View {
         let isCurrent = index == player.queue.currentIndex
         return HStack(spacing: 14) {
-            AsyncImage(url: api.artworkURL(for: item, size: 160)) { phase in
-                if case .success(let img) = phase {
-                    img.resizable().aspectRatio(1, contentMode: .fill)
-                } else {
-                    Color(.systemGray6)
-                }
+            LibraryImage(url: api.artworkURL(for: item, size: 160), maxPixel: 180) {
+                Color(.systemGray6)
             }
             .frame(width: 56, height: 56)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))

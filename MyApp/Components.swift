@@ -220,14 +220,8 @@ struct SpinningDisc: View {
     private var disc: some View {
         ZStack {
             // CD face = album art.
-            AsyncImage(url: artURL) { phase in
-                if case .success(let img) = phase {
-                    img.resizable().aspectRatio(1, contentMode: .fill)
-                } else {
-                    Color(.systemGray4)
-                }
-            }
-            .clipShape(Circle())
+            LibraryImage(url: artURL, maxPixel: 400) { Color(.systemGray4) }
+                .clipShape(Circle())
 
             // Iridescent disc sheen.
             Circle()
@@ -327,23 +321,13 @@ struct AlbumCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            AsyncImage(url: api.artworkURL(for: album, size: 600)) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable().aspectRatio(1, contentMode: .fill)
-                case .empty:
-                    Color(.systemGray6)
-                        .aspectRatio(1, contentMode: .fit)
-                        .overlay { ProgressView().scaleEffect(0.65).tint(Color(.systemGray3)) }
-                default:
-                    Color(.systemGray6)
-                        .aspectRatio(1, contentMode: .fit)
-                        .overlay {
-                            Image(systemName: "music.note")
-                                .font(.title2)
-                                .foregroundStyle(Color(.systemGray4))
-                        }
-                }
+            LibraryImage(url: api.artworkURL(for: album, size: 400), maxPixel: 400) {
+                Color(.systemGray6)
+                    .overlay {
+                        Image(systemName: "music.note")
+                            .font(.title2)
+                            .foregroundStyle(Color(.systemGray4))
+                    }
             }
             .aspectRatio(1, contentMode: .fit)
             .frame(maxWidth: .infinity)
@@ -373,17 +357,13 @@ struct ArtistRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            AsyncImage(url: api.artworkURL(for: artist, size: 120)) { phase in
-                if case .success(let img) = phase {
-                    img.resizable().aspectRatio(1, contentMode: .fill)
-                } else {
-                    Color(.systemGray5)
-                        .overlay {
-                            Image(systemName: "person.fill")
-                                .font(.title3)
-                                .foregroundStyle(Color(.systemGray3))
-                        }
-                }
+            LibraryImage(url: api.artworkURL(for: artist, size: 120), maxPixel: 200) {
+                Color(.systemGray5)
+                    .overlay {
+                        Image(systemName: "person.fill")
+                            .font(.title3)
+                            .foregroundStyle(Color(.systemGray3))
+                    }
             }
             .frame(width: large ? 66 : 56, height: large ? 66 : 56)
             .clipShape(Circle())
@@ -462,12 +442,8 @@ struct SongRow: View {
     @ViewBuilder
     private var leading: some View {
         if showAlbumArt {
-            AsyncImage(url: api.artworkURL(for: song, size: 100)) { phase in
-                if case .success(let img) = phase {
-                    img.resizable().aspectRatio(1, contentMode: .fill)
-                } else {
-                    Color(.systemGray6)
-                }
+            LibraryImage(url: api.artworkURL(for: song, size: 100), maxPixel: 160) {
+                Color(.systemGray6)
             }
             .frame(width: large ? 56 : 46, height: large ? 56 : 46)
             .clipShape(RoundedRectangle(cornerRadius: DS.cornerThumb, style: .continuous))
@@ -568,12 +544,8 @@ struct ArtistDetailView: View {
 
     private var heroHeader: some View {
         ZStack(alignment: .bottomLeading) {
-            AsyncImage(url: api.artworkURL(for: artist, size: 600)) { phase in
-                if case .success(let img) = phase {
-                    img.resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    Color(.systemGray5)
-                }
+            LibraryImage(url: api.artworkURL(for: artist, size: 600), maxPixel: 700) {
+                Color(.systemGray5)
             }
             .frame(maxWidth: .infinity)
             .frame(height: heroHeight)
