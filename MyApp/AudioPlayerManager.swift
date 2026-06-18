@@ -9,6 +9,9 @@ import MediaPlayer
 
 @MainActor
 class AudioPlayerManager: NSObject, ObservableObject {
+    /// Shared instance so App Intents (Siri / Shortcuts) can drive playback outside the view tree.
+    static let shared = AudioPlayerManager()
+
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var statusObservation: NSKeyValueObservation?

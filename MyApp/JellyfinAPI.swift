@@ -4,6 +4,9 @@ import Combine
 
 @MainActor
 class JellyfinAPI: ObservableObject {
+    /// Shared instance so App Intents (Siri / Shortcuts) can reach the API outside the view tree.
+    static let shared = JellyfinAPI()
+
     // Personal single-user app — credentials are baked in, no login flow.
     let serverURL    = "https://music.485-0.com"
     let accessToken  = "7bf28a1d98424dd0bfab971128840bba"

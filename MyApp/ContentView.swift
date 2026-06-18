@@ -2,8 +2,8 @@ import SwiftUI
 import CoreSpotlight
 
 @main struct JellytunesApp: App {
-    @StateObject private var api = JellyfinAPI()
-    @StateObject private var player = AudioPlayerManager()
+    @StateObject private var api = JellyfinAPI.shared
+    @StateObject private var player = AudioPlayerManager.shared
 
     init() {
         // Cache artwork aggressively so covers aren't re-downloaded while scrolling the
