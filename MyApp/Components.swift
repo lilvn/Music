@@ -118,6 +118,7 @@ struct AlbumCard: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
         }
+        .libraryItemMenu(album)
     }
 }
 

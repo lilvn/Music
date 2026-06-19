@@ -6,7 +6,13 @@ struct AlbumDetailView: View {
     @Environment(Player.self) private var player
     @State private var tracks: [MediaItem] = []
     @State private var isLoading = true
-    @State private var pickerTrack: MediaItem?
+    @State private var addRequest: PlaylistAddRequest?
+    /// Full album metadata fetched by id (so an album opened from a track — e.g. Recently Played —
+    /// still gets its name / year / artwork).
+    @State private var albumDetail: MediaItem?
+
+    private var info: MediaItem { albumDetail ?? album }
+    private var totalSeconds: Double { tracks.reduce(0) { $0 + ($1.durationSeconds ?? 0) } }
 
     var body: some View {
         List {
@@ -34,7 +40,7 @@ struct AlbumDetailView: View {
                                     onTap: { player.play(items: tracks, from: idx) },
                                     onPlayNext: { player.playNext(track) },
                                     onPlayLast: { player.playLast(track) },
-                                    onAddToPlaylist: { pickerTrack = track })
+                                    onAddToPlaylist: { addRequest = PlaylistAddRequest(itemIds: [track.id]) })
                                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                                 .listRowBackground(Color.clear)
                                 .trackSwipeActions(onPlayNext: { player.playNext(track) },
@@ -54,11 +60,20 @@ struct AlbumDetailView: View {
         .listStyle(.plain)
         .scrollIndicators(.hidden)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $pickerTrack) { PlaylistPickerSheet(track: $0) }
+        .sheet(item: $addRequest) { PlaylistPickerSheet(request: $0) }
         .task {
-            tracks = (try? await client.fetchTracks(parentId: album.id)) ?? []
+            async let detail = client.fetchItem(id: album.id)
+            async let trks = client.fetchTracks(parentId: album.id)
+            albumDetail = try? await detail
+            tracks = (try? await trks) ?? []
             isLoading = false
         }
+    }
+
+    private func formatLength(_ s: Double) -> String {
+        let t = Int(s.rounded())
+        let h = t / 3600, m = (t % 3600) / 60, sec = t % 60
+        return h > 0 ? "\(h)h \(m)m \(sec)s" : "\(m)m \(sec)s"
     }
 
     private var header: some View {
@@ -83,7 +98,7 @@ struct AlbumDetailView: View {
     }
 
     private var artwork: some View {
-        LibraryImage(url: client.artworkURL(for: album, size: 600), maxPixel: 600) {
+        LibraryImage(url: client.artworkURL(for: info, size: 600), maxPixel: 600) {
             Color(.secondarySystemBackground)
                 .overlay {
                     Image(systemName: "music.note")
@@ -98,22 +113,27 @@ struct AlbumDetailView: View {
     }
 
     private var metadata: some View {
-        VStack(spacing: 6) {
-            Text(album.name)
+        let count = tracks.isEmpty ? (info.childCount ?? 0) : tracks.count
+        return VStack(spacing: 6) {
+            Text(info.name)
                 .font(.title2).fontWeight(.bold)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, DS.hPad)
-            Text(album.albumArtist ?? album.primaryArtist)
+            Text(info.albumArtist ?? info.primaryArtist)
                 .font(.callout).foregroundStyle(.secondary)
             HStack(spacing: 6) {
-                if let year = album.productionYear { Text(String(year)) }
-                if album.productionYear != nil, album.childCount != nil {
-                    Text("·").foregroundStyle(.quaternary)
-                }
-                if let count = album.childCount { Text("\(count) song\(count == 1 ? "" : "s")") }
+                if let year = info.productionYear { Text(String(year)) }
+                if info.productionYear != nil, count > 0 { Text("·").foregroundStyle(.quaternary) }
+                if count > 0 { Text("\(count) song\(count == 1 ? "" : "s")") }
             }
             .font(.footnote)
             .foregroundStyle(.tertiary)
+            if totalSeconds > 0 {
+                Text(formatLength(totalSeconds))
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            }
         }
     }
 

@@ -8,6 +8,7 @@ struct HomeView: View {
     @State private var featured: [MediaItem] = []
     @State private var artists: [MediaItem] = []
     @State private var loaded = false
+    @State private var showSettings = false
 
     var body: some View {
         LibraryStack {
@@ -29,14 +30,22 @@ struct HomeView: View {
                         }
                         if !loaded {
                             ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
+                        } else {
+                            Button("Settings") { showSettings = true }
+                                .font(.footnote)
+                                .tint(.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 16)
                         }
                     }
                     .padding(.bottom, 24)
                 }
                 .scrollIndicators(.hidden)
+                .scrollEdgeEffectHidden(true, for: .top)
                 .ignoresSafeArea(edges: .top)
             }
             .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $showSettings) { SettingsView() }
             .task { await load() }
         }
     }
@@ -76,10 +85,8 @@ struct FeaturedShelf: View {
                         }
                     }
                 }
-                .scrollTargetLayout()
             }
             .contentMargins(.horizontal, DS.hPad, for: .scrollContent)
-            .scrollTargetBehavior(.paging)
         }
     }
 }
@@ -175,7 +182,6 @@ struct ArtistsShelf: View {
 struct RecentlyPlayedShelf: View {
     let tracks: [MediaItem]
     @Environment(JellyfinClient.self) private var client
-    @Environment(Player.self) private var player
     private let cardSize: CGFloat = 132
 
     var body: some View {
@@ -186,8 +192,9 @@ struct RecentlyPlayedShelf: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
-                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                        Button { player.play(items: tracks, from: index) } label: {
+                    ForEach(tracks) { track in
+                        // Tapping opens the track's album detail (not instant playback).
+                        LibraryLink(route: .album(albumItem(for: track))) {
                             VStack(alignment: .leading, spacing: 6) {
                                 LibraryImage(url: client.artworkURL(for: track, size: 400), maxPixel: 400) {
                                     Color(.systemGray6)
@@ -198,7 +205,7 @@ struct RecentlyPlayedShelf: View {
                                 .shadow(color: .black.opacity(DS.shadowOpacity), radius: DS.shadowRadius, y: DS.shadowY)
 
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(track.name)
+                                    Text(track.album ?? track.name)
                                         .font(.footnote).fontWeight(.semibold)
                                         .foregroundStyle(.primary).lineLimit(1)
                                     Text(track.primaryArtist)
@@ -207,11 +214,20 @@ struct RecentlyPlayedShelf: View {
                                 .frame(width: cardSize, alignment: .leading)
                             }
                         }
-                        .buttonStyle(ScaleButtonStyle())
                     }
                 }
                 .padding(.horizontal, DS.hPad)
             }
         }
+    }
+
+    /// A minimal album item for navigation; AlbumDetailView fetches full metadata by id.
+    private func albumItem(for t: MediaItem) -> MediaItem {
+        MediaItem(id: t.albumId ?? t.id, name: t.album ?? t.name, type: "MusicAlbum",
+                  sortName: nil, albumArtist: t.albumArtist, albumArtists: nil,
+                  album: nil, albumId: nil, artistItems: t.artistItems,
+                  indexNumber: nil, parentIndexNumber: nil, runTimeTicks: nil,
+                  productionYear: nil, imageTags: nil, albumPrimaryImageTag: nil,
+                  childCount: nil, overview: nil, playlistItemId: nil)
     }
 }

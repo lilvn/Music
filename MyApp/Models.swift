@@ -94,6 +94,20 @@ struct CreatePlaylistResult: Codable {
     enum CodingKeys: String, CodingKey { case id = "Id" }
 }
 
+// MARK: - Authentication
+
+struct AuthResponse: Codable {
+    let accessToken: String
+    let user: AuthUser
+    enum CodingKeys: String, CodingKey { case accessToken = "AccessToken", user = "User" }
+}
+
+struct AuthUser: Codable {
+    let id: String
+    let name: String
+    enum CodingKeys: String, CodingKey { case id = "Id", name = "Name" }
+}
+
 // MARK: - Navigation
 
 /// Value-based push route. Identifiable so it can also drive a `.sheet(item:)`.

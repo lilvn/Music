@@ -84,14 +84,14 @@ struct ReflectedCover: View {
             artworkStack
 
             // Reflection mirrors the WHOLE artwork — the cover AND the spinning CD when it's out —
-            // so the disc keeps its reflection instead of floating untethered.
+            // so the disc keeps its reflection instead of floating untethered. No hard clip (the
+            // mask handles the fade) so a slid-out CD / rotated cover isn't cut off at the edges.
             ZStack(alignment: .top) {
                 artworkStack
                     .scaleEffect(y: -1)
                     .frame(height: size * 0.5, alignment: .top)
-                    .clipped()
                     .mask(
-                        LinearGradient(colors: [.white.opacity(0.4), .clear],
+                        LinearGradient(colors: [.white.opacity(0.18), .clear],
                                        startPoint: .top, endPoint: .bottom)
                     )
 
@@ -111,6 +111,7 @@ struct ReflectedCover: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { playAlbum() }
+        .libraryItemMenu(album)
         .frame(width: size)
         .task(id: album.id) {
             guard uiImage == nil, let url = client.artworkURL(for: album, size: 600) else { return }

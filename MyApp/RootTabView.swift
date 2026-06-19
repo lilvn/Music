@@ -24,13 +24,14 @@ struct RootTabView: View {
             Tab("Playlists", systemImage: "music.note.list", value: RootTab.playlists) {
                 PlaylistsView()
             }
-            Tab(value: RootTab.search, role: .search) {
+            Tab("Search", systemImage: "magnifyingglass", value: RootTab.search) {
                 SearchView()
             }
         }
-        // Only reserve the accessory when something is playing — an always-on accessory leaves an
-        // empty frosted pill above the tab bar when idle. It animates in/out with playback.
-        .modifier(MiniPlayerAccessory(active: player.currentItem != nil, namespace: npZoom))
+        // Apply the accessory ALWAYS (stable identity). Toggling it on/off would change the
+        // TabView's type and re-create every tab — reloading Home and resetting scroll the moment
+        // playback starts ("refreshes the page"). MiniPlayer renders nothing when idle.
+        .tabViewBottomAccessory { MiniPlayer(namespace: npZoom) }
         // Now Playing zoom-expands from the mini player. `fullScreenCover` (not `.sheet`) is what
         // actually animates `.navigationTransition(.zoom)` on this build.
         .fullScreenCover(isPresented: $player.showNowPlaying) {
@@ -61,17 +62,3 @@ struct RootTabView: View {
 }
 
 enum RootTab: Hashable { case home, albums, playlists, search }
-
-/// Applies the mini-player accessory only while a track is loaded, so the bar is absent (not an
-/// empty pill) when idle. The TabView keeps its identity, so tab selection / pushed details survive.
-private struct MiniPlayerAccessory: ViewModifier {
-    let active: Bool
-    let namespace: Namespace.ID
-    func body(content: Content) -> some View {
-        if active {
-            content.tabViewBottomAccessory { MiniPlayer(namespace: namespace) }
-        } else {
-            content
-        }
-    }
-}

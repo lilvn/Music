@@ -95,6 +95,7 @@ struct PlaylistCard: View {
                 }
             }
         }
+        .libraryItemMenu(playlist)
     }
 }
 
@@ -226,10 +227,56 @@ struct PlaylistDetailView: View {
     }
 }
 
+// MARK: - 3D-touch / long-press menu for containers (album / playlist)
+
+/// Items to add to a playlist — one track, or all tracks of an album/playlist.
+struct PlaylistAddRequest: Identifiable {
+    let id = UUID()
+    let itemIds: [String]
+}
+
+/// Long-press (3D-touch) menu for an album or playlist card: Play Next / Play Last / Add to Playlist,
+/// operating on the container's tracks (fetched on demand).
+struct LibraryItemMenu: ViewModifier {
+    let item: MediaItem
+    @Environment(Player.self) private var player
+    @Environment(JellyfinClient.self) private var client
+    @State private var addRequest: PlaylistAddRequest?
+
+    func body(content: Content) -> some View {
+        content
+            .contextMenu {
+                Button { queue(next: true) } label: {
+                    Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                }
+                Button { queue(next: false) } label: {
+                    Label("Play Last", systemImage: "text.line.last.and.arrowtriangle.forward")
+                }
+                Button { Task { addRequest = PlaylistAddRequest(itemIds: await trackIds()) } } label: {
+                    Label("Add to Playlist", systemImage: "text.badge.plus")
+                }
+            }
+            .sheet(item: $addRequest) { PlaylistPickerSheet(request: $0) }
+    }
+
+    private func tracks() async -> [MediaItem] {
+        if item.type == "Playlist" { return (try? await client.fetchPlaylistItems(playlistId: item.id)) ?? [] }
+        return (try? await client.fetchTracks(parentId: item.id)) ?? []
+    }
+    private func trackIds() async -> [String] { await tracks().map(\.id) }
+    private func queue(next: Bool) {
+        Task { let t = await tracks(); next ? player.playNext(t) : player.playLast(t) }
+    }
+}
+
+extension View {
+    func libraryItemMenu(_ item: MediaItem) -> some View { modifier(LibraryItemMenu(item: item)) }
+}
+
 // MARK: - Add-to-playlist picker
 
 struct PlaylistPickerSheet: View {
-    let track: MediaItem
+    let request: PlaylistAddRequest
     @Environment(JellyfinClient.self) private var client
     @Environment(\.dismiss) private var dismiss
     @State private var playlists: [MediaItem] = []
@@ -286,7 +333,7 @@ struct PlaylistPickerSheet: View {
 
     private func add(to playlist: MediaItem) {
         Task {
-            try? await client.addToPlaylist(playlist.id, itemIds: [track.id])
+            try? await client.addToPlaylist(playlist.id, itemIds: request.itemIds)
             dismiss()
         }
     }
@@ -295,8 +342,7 @@ struct PlaylistPickerSheet: View {
         let name = newName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
         Task {
-            let id = (try? await client.createPlaylist(name: name, itemIds: [track.id])) ?? ""
-            _ = id
+            _ = try? await client.createPlaylist(name: name, itemIds: request.itemIds)
             dismiss()
         }
     }

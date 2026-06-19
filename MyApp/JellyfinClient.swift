@@ -9,15 +9,70 @@ final class JellyfinClient {
     /// Shared instance so App Intents (Siri / Shortcuts) can reach the API outside the view tree.
     static let shared = JellyfinClient()
 
-    let serverURL   = "https://music.485-0.com"
-    let accessToken = "7bf28a1d98424dd0bfab971128840bba"
-    let userId      = "55044ca5301b4cc5b69bf1eb6974d684"
-    let username    = "485"
+    // Credentials are entered at first launch and persisted — nothing is baked into the app.
+    private(set) var serverURL: String
+    private(set) var accessToken: String
+    private(set) var userId: String
+    private(set) var username: String
+
+    var isAuthenticated: Bool { !serverURL.isEmpty && !accessToken.isEmpty && !userId.isEmpty }
+
+    private enum Keys {
+        static let server = "jf.server", token = "jf.token", userId = "jf.userId", username = "jf.username"
+    }
+
+    init() {
+        let d = UserDefaults.standard
+        serverURL   = d.string(forKey: Keys.server) ?? ""
+        accessToken = d.string(forKey: Keys.token) ?? ""
+        userId      = d.string(forKey: Keys.userId) ?? ""
+        username    = d.string(forKey: Keys.username) ?? ""
+    }
 
     private var baseURL: URL? { URL(string: serverURL) }
 
-    private var authHeader: String {
-        "MediaBrowser Client=\"Music\", Device=\"Apple\", DeviceId=\"music-app-001\", Version=\"1.0\", Token=\"\(accessToken)\""
+    private var deviceAuthHeader: String {
+        "MediaBrowser Client=\"Music\", Device=\"Apple\", DeviceId=\"music-app-001\", Version=\"1.0\""
+    }
+    private var authHeader: String { "\(deviceAuthHeader), Token=\"\(accessToken)\"" }
+
+    // MARK: - Authentication
+
+    /// Authenticate against a Jellyfin server with a username + password and persist the session.
+    func authenticate(server: String, username: String, password: String) async throws {
+        var s = server.trimmingCharacters(in: .whitespaces)
+        if !s.lowercased().hasPrefix("http") { s = "https://" + s }   // default to https
+        while s.hasSuffix("/") { s.removeLast() }
+        guard let base = URL(string: s) else { throw APIError.invalidURL }
+
+        var req = URLRequest(url: base.appendingPathComponent("Users/AuthenticateByName"))
+        req.httpMethod = "POST"
+        req.setValue(deviceAuthHeader, forHTTPHeaderField: "Authorization")   // no token yet
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["Username": username, "Pw": password])
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw APIError.httpError((resp as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        let auth = try JSONDecoder().decode(AuthResponse.self, from: data)
+
+        serverURL = s
+        accessToken = auth.accessToken
+        userId = auth.user.id
+        self.username = auth.user.name
+
+        let d = UserDefaults.standard
+        d.set(serverURL, forKey: Keys.server)
+        d.set(accessToken, forKey: Keys.token)
+        d.set(userId, forKey: Keys.userId)
+        d.set(self.username, forKey: Keys.username)
+    }
+
+    func signOut() {
+        serverURL = ""; accessToken = ""; userId = ""; username = ""
+        let d = UserDefaults.standard
+        [Keys.server, Keys.token, Keys.userId, Keys.username].forEach { d.removeObject(forKey: $0) }
     }
 
     // MARK: - Library

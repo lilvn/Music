@@ -2,6 +2,9 @@ import SwiftUI
 
 @main
 struct MusicApp: App {
+    @State private var client = JellyfinClient.shared
+    @State private var player = Player.shared
+
     init() {
         // Cache artwork aggressively so covers aren't re-downloaded while scrolling grids /
         // carousels or re-rendering during playback.
@@ -11,10 +14,16 @@ struct MusicApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootTabView()
-                .environment(JellyfinClient.shared)
-                .environment(Player.shared)
-                .tint(.primary)
+            Group {
+                if client.isAuthenticated {
+                    RootTabView()
+                } else {
+                    LoginView()
+                }
+            }
+            .environment(client)
+            .environment(player)
+            .tint(.primary)
         }
     }
 }
