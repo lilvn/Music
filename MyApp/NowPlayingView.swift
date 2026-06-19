@@ -8,6 +8,7 @@ struct NowPlayingView: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(\.dismiss) private var dismiss
     @State private var showQueue = false
+    @State private var showLyrics = false
 
     private var seed: Int {
         (player.currentItem?.id ?? "x").unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
@@ -44,6 +45,11 @@ struct NowPlayingView: View {
         .background { Color(.systemBackground).ignoresSafeArea() }
         .sheet(isPresented: $showQueue) {
             UpNextView()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showLyrics) {
+            LyricsView()
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
@@ -125,19 +131,24 @@ struct NowPlayingView: View {
     }
 
     private var bottomRow: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             toggle(system: "shuffle", active: player.queue.isShuffled) { player.toggleShuffle() }
-            Button { showQueue = true } label: {
-                Image(systemName: "list.bullet")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 54, height: 54)
-                    .background(Color(.secondarySystemBackground), in: .circle)
-            }
-            .buttonStyle(ScaleButtonStyle())
+            action(system: "list.bullet") { showQueue = true }
+            action(system: "quote.bubble") { showLyrics = true }
             toggle(system: player.queue.repeatMode.systemImage,
                    active: player.queue.repeatMode.isActive) { player.cycleRepeat() }
         }
+    }
+
+    private func action(system: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 54, height: 54)
+                .background(Color(.secondarySystemBackground), in: .circle)
+        }
+        .buttonStyle(ScaleButtonStyle())
     }
 
     private func toggle(system: String, active: Bool, action: @escaping () -> Void) -> some View {
