@@ -90,9 +90,12 @@ struct ReflectedCover: View {
                 artworkStack
                     .scaleEffect(y: -1)
                     .frame(height: size * 0.5, alignment: .top)
+                    // Fade gradient is wider than the artwork (which overflows its frame via the
+                    // slid-out CD / rotation) so it ONLY fades vertically and never clips the sides.
                     .mask(
                         LinearGradient(colors: [.white.opacity(0.18), .clear],
                                        startPoint: .top, endPoint: .bottom)
+                            .frame(width: size * 2.4, height: size * 0.5)
                     )
 
                 VStack(spacing: 1) {
