@@ -21,9 +21,9 @@ struct MiniPlayer: View {
         player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0
     }
     private var displayProgress: Double { scrubbing ? dragProgress : progress }
-    // Keep the disc turning *through* a scrub (if it was playing) instead of freezing the instant the
-    // user grabs the playhead — scrubbing pauses the audio, but stopping/restarting the spin looked buggy.
-    private var shouldSpin: Bool { player.isPlaying || (scrubbing && scrubWasPlaying) }
+    // Keep the disc turning while scrubbing (scrubbing pauses the audio, but the spinning CD is the
+    // feedback that you're dragging the playhead).
+    private var shouldSpin: Bool { player.isPlaying || scrubbing }
 
     var body: some View {
         if let item = player.currentItem {
@@ -55,11 +55,12 @@ struct MiniPlayer: View {
             }
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 12)
-        // Progress fill behind the content (subtle), magnified while scrubbing.
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)   // fill the accessory's pill
+        // Progress fill behind the content, filling the whole pill; magnified while scrubbing.
         .background(alignment: .leading) {
             Rectangle()
-                .fill(Color.primary.opacity(scrubbing ? 0.14 : 0.07))
+                .fill(Color.primary.opacity(scrubbing ? 0.16 : 0.09))
                 .frame(width: max(0, width * displayProgress))
                 .animation(scrubbing ? nil : .linear(duration: 0.5), value: displayProgress)
                 .allowsHitTesting(false)
@@ -69,7 +70,9 @@ struct MiniPlayer: View {
                 Color.clear.onChange(of: g.size.width, initial: true) { _, w in width = w }
             }
         }
-        .scaleEffect(scrubbing ? 1.04 : 1.0)
+        .clipShape(Capsule())          // keep the fill inside the pill's rounded shape
+        .contentShape(Capsule())
+        .scaleEffect(scrubbing ? 1.03 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: scrubbing)
         .simultaneousGesture(scrubGesture)
         .sensoryFeedback(trigger: scrubbing) { _, now in now ? .impact(weight: .heavy, intensity: 1.0) : nil }
@@ -85,6 +88,7 @@ struct MiniPlayer: View {
                     if !scrubbing {
                         scrubbing = true
                         scrubStart = progress
+                        dragProgress = progress   // start exactly at the current playhead, no jump
                         scrubWasPlaying = player.isPlaying
                         player.beginScrubbing()
                     }

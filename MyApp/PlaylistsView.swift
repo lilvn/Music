@@ -95,7 +95,6 @@ struct PlaylistCard: View {
                 }
             }
         }
-        .libraryItemMenu(playlist)
     }
 }
 

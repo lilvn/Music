@@ -58,6 +58,7 @@ struct LibraryLink<Label: View>: View {
         NavigationLink(value: route) { label() }
             .buttonStyle(ScaleButtonStyle())
             .modifier(MatchedSourceIfAvailable(id: route.id, ns: ns))
+            .modifier(RouteMenu(route: route))
     }
 }
 
@@ -67,6 +68,19 @@ private struct MatchedSourceIfAvailable: ViewModifier {
     func body(content: Content) -> some View {
         if let ns { content.matchedTransitionSource(id: id, in: ns) }
         else { content }
+    }
+}
+
+/// Attaches the album/playlist long-press (3D-touch) menu to a link based on its route — applied to
+/// the link itself (not the label), which is where a context menu actually triggers reliably. Artists
+/// have no container menu.
+private struct RouteMenu: ViewModifier {
+    let route: LibraryRoute
+    func body(content: Content) -> some View {
+        switch route {
+        case .album(let m), .playlist(let m): content.libraryItemMenu(m)
+        case .artist: content
+        }
     }
 }
 
@@ -118,7 +132,6 @@ struct AlbumCard: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
         }
-        .libraryItemMenu(album)
     }
 }
 
