@@ -2,6 +2,8 @@ import SwiftUI
 
 struct AlbumDetailView: View {
     let album: MediaItem
+    /// When set (e.g. opened from a Recently Played song), that track is tinted and scrolled into view.
+    var highlightSongId: String? = nil
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
     @State private var tracks: [MediaItem] = []
@@ -15,6 +17,7 @@ struct AlbumDetailView: View {
     private var totalSeconds: Double { tracks.reduce(0) { $0 + ($1.durationSeconds ?? 0) } }
 
     var body: some View {
+        ScrollViewReader { proxy in
         List {
             Section {
                 header
@@ -41,8 +44,10 @@ struct AlbumDetailView: View {
                                     onPlayNext: { player.playNext(track) },
                                     onPlayLast: { player.playLast(track) },
                                     onAddToPlaylist: { addRequest = PlaylistAddRequest(itemIds: [track.id]) })
+                                .id(track.id)
                                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                                .listRowBackground(Color.clear)
+                                .listRowBackground(track.id == highlightSongId
+                                                   ? Color.primary.opacity(0.08) : Color.clear)
                                 .trackSwipeActions(onPlayNext: { player.playNext(track) },
                                                    onPlayLast: { player.playLast(track) })
                         }
@@ -67,7 +72,12 @@ struct AlbumDetailView: View {
             albumDetail = try? await detail
             tracks = (try? await trks) ?? []
             isLoading = false
+            if let h = highlightSongId {
+                try? await Task.sleep(for: .milliseconds(300))
+                withAnimation(.easeInOut) { proxy.scrollTo(h, anchor: .center) }
+            }
         }
+        }   // ScrollViewReader
     }
 
     private func formatLength(_ s: Double) -> String {
@@ -86,14 +96,14 @@ struct AlbumDetailView: View {
         .padding(.top, 12)
     }
 
-    /// Play pill flanked by round "play next" (left) and "add to queue" (right).
+    /// Play pill flanked by round "play last" (left) and "play next" (right).
     private var playRow: some View {
         HStack(spacing: 16) {
-            QueueActionButton(icon: "text.line.first.and.arrowtriangle.forward",
-                              disabled: tracks.isEmpty) { player.playNext(tracks) }
-            playButton
             QueueActionButton(icon: "text.line.last.and.arrowtriangle.forward",
                               disabled: tracks.isEmpty) { player.playLast(tracks) }
+            playButton
+            QueueActionButton(icon: "text.line.first.and.arrowtriangle.forward",
+                              disabled: tracks.isEmpty) { player.playNext(tracks) }
         }
     }
 
@@ -107,7 +117,7 @@ struct AlbumDetailView: View {
                 }
         }
         .frame(width: 240, height: 240)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: DS.cornerArtwork, style: .continuous))
         .shadow(color: .black.opacity(0.2), radius: 18, y: 10)
         .frame(maxWidth: .infinity)
     }
@@ -144,10 +154,10 @@ struct AlbumDetailView: View {
         } label: {
             Label("Play", systemImage: "play.fill")
                 .font(.headline)
-                .foregroundStyle(Color(.systemBackground))
+                .foregroundStyle(.primary)
                 .padding(.horizontal, 44)
                 .padding(.vertical, 14)
-                .background(Color.primary, in: .capsule)
+                .glassEffect(.regular.interactive(), in: Capsule())
         }
         .buttonStyle(.plain)
         .disabled(tracks.isEmpty)

@@ -85,6 +85,8 @@ struct SearchView: View {
                 }
                 .scrollIndicators(.hidden)
                 .scrollDismissesKeyboard(.immediately)
+                // Tap anywhere in the results area (not the field) to close the keyboard.
+                .simultaneousGesture(TapGesture().onEnded { dismissKeyboard() })
             }
             .navigationTitle("Search")
             .navigationBarTitleDisplayMode(.inline)
@@ -184,6 +186,10 @@ struct SearchView: View {
         }
         .padding(.top, 8)
         .padding(.bottom, 24)
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     private func sectionLabel(_ title: String, icon: String) -> some View {

@@ -184,6 +184,34 @@ struct RecentlyPlayedShelf: View {
     @Environment(JellyfinClient.self) private var client
     private let cardSize: CGFloat = 132
 
+    /// One recently-played card: a whole-album play collapses a run of same-album tracks into a single
+    /// album card; a one-off track stays a song card. `track` is the representative track (also used
+    /// for artwork, which resolves via its album).
+    private struct Entry: Identifiable {
+        let track: MediaItem
+        let isAlbum: Bool
+        var id: String { (isAlbum ? "a-" : "s-") + track.id }
+    }
+
+    /// Collapse consecutive same-album tracks (an album play) into one album entry; singles stay songs.
+    private var entries: [Entry] {
+        var out: [Entry] = []
+        var i = 0
+        while i < tracks.count {
+            let t = tracks[i]
+            if let aid = t.albumId {
+                var j = i + 1
+                while j < tracks.count, tracks[j].albumId == aid { j += 1 }
+                out.append(Entry(track: t, isAlbum: j - i >= 2))
+                i = j
+            } else {
+                out.append(Entry(track: t, isAlbum: false))
+                i += 1
+            }
+        }
+        return out
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Recently Played")
@@ -192,32 +220,36 @@ struct RecentlyPlayedShelf: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
-                    ForEach(tracks) { track in
-                        // Tapping opens the track's album detail (not instant playback).
-                        LibraryLink(route: .album(albumItem(for: track))) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                LibraryImage(url: client.artworkURL(for: track, size: 400), maxPixel: 400) {
-                                    Color(.systemGray6)
-                                        .overlay { Image(systemName: "music.note").foregroundStyle(Color(.systemGray4)) }
-                                }
-                                .frame(width: cardSize, height: cardSize)
-                                .clipShape(RoundedRectangle(cornerRadius: DS.cornerCard, style: .continuous))
-                                .shadow(color: .black.opacity(DS.shadowOpacity), radius: DS.shadowRadius, y: DS.shadowY)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(track.album ?? track.name)
-                                        .font(.footnote).fontWeight(.semibold)
-                                        .foregroundStyle(.primary).lineLimit(1)
-                                    Text(track.primaryArtist)
-                                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                }
-                                .frame(width: cardSize, alignment: .leading)
-                            }
+                    ForEach(entries) { e in
+                        let album = albumItem(for: e.track)
+                        // Album → album detail; song → album detail with the song highlighted.
+                        LibraryLink(route: e.isAlbum ? .album(album) : .albumSong(album, e.track.id)) {
+                            card(track: e.track,
+                                 title: e.isAlbum ? (e.track.album ?? e.track.name) : e.track.name,
+                                 subtitle: e.track.primaryArtist)
                         }
                     }
                 }
                 .padding(.horizontal, DS.hPad)
             }
+        }
+    }
+
+    private func card(track: MediaItem, title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            LibraryImage(url: client.artworkURL(for: track, size: 400), maxPixel: 400) {
+                Color(.systemGray6)
+                    .overlay { Image(systemName: "music.note").foregroundStyle(Color(.systemGray4)) }
+            }
+            .frame(width: cardSize, height: cardSize)
+            .clipShape(RoundedRectangle(cornerRadius: DS.cornerCard, style: .continuous))
+            .shadow(color: .black.opacity(DS.shadowOpacity), radius: DS.shadowRadius, y: DS.shadowY)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.footnote).fontWeight(.semibold).foregroundStyle(.primary).lineLimit(1)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(width: cardSize, alignment: .leading)
         }
     }
 

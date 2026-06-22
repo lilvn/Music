@@ -187,41 +187,44 @@ struct SpinningDisc: View {
 
     private var disc: some View {
         ZStack {
-            // CD face = album art.
-            LibraryImage(url: artURL, maxPixel: 400) { Color(.systemGray4) }
-                .clipShape(Circle())
+            // Shiny silver CD body (the data area).
+            Circle()
+                .fill(RadialGradient(
+                    colors: [Color(white: 0.83), Color(white: 0.58), Color(white: 0.86), Color(white: 0.6)],
+                    center: .center, startRadius: size * 0.16, endRadius: size * 0.52))
 
-            // Iridescent disc sheen.
+            // Iridescent rainbow sheen.
             Circle()
                 .fill(AngularGradient(
                     gradient: Gradient(colors: [
-                        .clear, .white.opacity(0.38), .clear, .cyan.opacity(0.22), .clear,
-                        .white.opacity(0.32), .clear, .pink.opacity(0.18), .clear,
+                        .clear, .cyan.opacity(0.35), .clear, .pink.opacity(0.30), .clear,
+                        .green.opacity(0.30), .clear, .blue.opacity(0.30), .clear, .cyan.opacity(0.35), .clear,
                     ]),
                     center: .center))
                 .blendMode(.screen)
-                .opacity(0.55)
+                .opacity(0.6)
+
+            // Specular highlight streak.
+            Circle()
+                .fill(AngularGradient(
+                    colors: [.white.opacity(0.55), .clear, .clear, .clear, .white.opacity(0.4), .clear, .clear, .clear],
+                    center: .center))
+                .blendMode(.screen)
+                .opacity(0.5)
 
             // Outer rim highlight.
-            Circle().strokeBorder(.white.opacity(0.18), lineWidth: max(0.5, size * 0.012))
+            Circle().strokeBorder(.white.opacity(0.3), lineWidth: max(0.5, size * 0.012))
 
-            // Characteristic reflective CD ring around the hub.
-            Circle()
-                .strokeBorder(
-                    AngularGradient(
-                        colors: [.white.opacity(0.6), .white.opacity(0.1), .white.opacity(0.55),
-                                 .white.opacity(0.1), .white.opacity(0.6)],
-                        center: .center),
-                    lineWidth: max(1, size * 0.022))
-                .frame(width: size * 0.46, height: size * 0.46)
+            // Center label = album art sticker (the only place the art lives).
+            LibraryImage(url: artURL, maxPixel: 200) { Color(.systemGray3) }
+                .frame(width: size * 0.44, height: size * 0.44)
+                .clipShape(Circle())
+                .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: max(0.5, size * 0.012)))
 
-            // Hub (clear plastic label area) + spindle hole.
-            Circle().fill(Color(.systemBackground)).frame(width: size * 0.32, height: size * 0.32)
-            Circle().strokeBorder(.white.opacity(0.3), lineWidth: 0.8)
-                .frame(width: size * 0.32, height: size * 0.32)
-            Circle().fill(Color(.systemBackground).opacity(0.5)).frame(width: size * 0.11, height: size * 0.11)
+            // Hub + spindle hole.
+            Circle().fill(Color(.systemBackground).opacity(0.92)).frame(width: size * 0.13, height: size * 0.13)
             Circle().strokeBorder(.black.opacity(0.3), lineWidth: 0.7)
-                .frame(width: size * 0.11, height: size * 0.11)
+                .frame(width: size * 0.13, height: size * 0.13)
         }
         .frame(width: size, height: size)
     }

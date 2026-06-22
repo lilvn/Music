@@ -38,6 +38,7 @@ struct LyricsView: View {
                 }
             }
         }
+        .presentationBackground(.thinMaterial)
         .task {
             if let id = player.currentItem?.id {
                 lines = (try? await client.fetchLyrics(itemId: id)) ?? []

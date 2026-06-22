@@ -112,7 +112,7 @@ struct NowPlayingView: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: DS.cornerArtwork, style: .continuous))
         .shadow(color: .black.opacity(0.22), radius: 24, y: 14)
         .scaleEffect(player.isPlaying ? 1.0 : 0.9)
         .animation(.spring(response: 0.55, dampingFraction: 0.72), value: player.isPlaying)
@@ -262,7 +262,7 @@ struct WaveformScrubber: View {
                         .onChanged { value in
                             guard duration > 0 else { return }
                             if case .second(true, let drag) = value {
-                                if !scrubbing { scrubbing = true; didHold = true; scrubStart = progress; onScrubBegin() }
+                                if !scrubbing { scrubbing = true; didHold = true; scrubStart = progress; dragProgress = progress; onScrubBegin() }
                                 if let drag {
                                     dragProgress = min(max(scrubStart + drag.translation.width / w, 0), 1)
                                     let t = Int(dragProgress * 60)

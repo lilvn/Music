@@ -7,6 +7,7 @@ enum DS {
     static let gridPad: CGFloat = 16       // horizontal padding for grids
     static let gridSpacing: CGFloat = 12   // spacing between grid cells
     static let cornerCard: CGFloat = 16    // album / artist cards
+    static let cornerArtwork: CGFloat = 18 // large artwork (album detail, now playing)
     static let cornerThumb: CGFloat = 10   // row thumbnails
     static let cornerMini: CGFloat = 11    // mini player artwork
     static let shadowRadius: CGFloat = 8
@@ -79,6 +80,7 @@ private struct RouteMenu: ViewModifier {
     func body(content: Content) -> some View {
         switch route {
         case .album(let m), .playlist(let m): content.libraryItemMenu(m)
+        case .albumSong(let m, _): content.libraryItemMenu(m)
         case .artist: content
         }
     }
@@ -90,6 +92,7 @@ func destinationView(for route: LibraryRoute) -> some View {
     case .album(let album):       AlbumDetailView(album: album)
     case .artist(let artist):     ArtistDetailView(artist: artist)
     case .playlist(let playlist): PlaylistDetailView(playlist: playlist)
+    case .albumSong(let album, let songId): AlbumDetailView(album: album, highlightSongId: songId)
     }
 }
 
@@ -331,7 +334,7 @@ struct QueueActionButton: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.primary)
                 .frame(width: 52, height: 52)
-                .background(Color(.secondarySystemBackground), in: .circle)
+                .glassEffect(.regular.interactive(), in: Circle())
         }
         .buttonStyle(ScaleButtonStyle())
         .disabled(disabled)

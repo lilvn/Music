@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// The Up Next queue, presented as a sheet from Now Playing. Tap a row to jump to it; swipe to
-/// remove (the current track can't be removed); shuffle / repeat live in the toolbar.
+/// The Up Next queue, presented as a Liquid-Glass sheet from Now Playing. Tap a row to jump to it;
+/// swipe to remove (the current track can't be removed); shuffle (bottom-left) and repeat
+/// (bottom-right) are glass buttons pinned to the corners.
 struct UpNextView: View {
     @Environment(Player.self) private var player
     @Environment(JellyfinClient.self) private var client
@@ -9,48 +10,62 @@ struct UpNextView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(Array(player.queue.items.enumerated()), id: \.offset) { index, item in
-                    row(index: index, item: item)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 6, trailing: 20))
-                        .listRowSeparator(.hidden)
-                        .contentShape(Rectangle())
-                        .onTapGesture { player.play(at: index) }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            if index != player.queue.currentIndex {
-                                Button(role: .destructive) {
-                                    player.removeFromQueue(at: index)
-                                } label: { Label("Remove", systemImage: "minus.circle") }
+            ZStack(alignment: .bottom) {
+                List {
+                    ForEach(Array(player.queue.items.enumerated()), id: \.offset) { index, item in
+                        row(index: index, item: item)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 6, trailing: 20))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .contentShape(Rectangle())
+                            .onTapGesture { player.play(at: index) }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                if index != player.queue.currentIndex {
+                                    Button(role: .destructive) {
+                                        player.removeFromQueue(at: index)
+                                    } label: { Label("Remove", systemImage: "minus.circle") }
+                                }
                             }
-                        }
+                    }
+                    Color.clear.frame(height: 80)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.hidden)
+
+                HStack {
+                    glassToggle("shuffle", active: player.queue.isShuffled) { player.toggleShuffle() }
+                    Spacer()
+                    glassToggle(player.queue.repeatMode.systemImage,
+                                active: player.queue.repeatMode.isActive) { player.cycleRepeat() }
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 12)
             }
-            .listStyle(.plain)
-            .scrollIndicators(.hidden)
             .navigationTitle("Up Next")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 4) {
-                        toolbarToggle("shuffle", active: player.queue.isShuffled) { player.toggleShuffle() }
-                        toolbarToggle(player.queue.repeatMode.systemImage,
-                                      active: player.queue.repeatMode.isActive) { player.cycleRepeat() }
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }.fontWeight(.semibold)
                 }
             }
         }
+        .presentationBackground(.thinMaterial)
     }
 
-    private func toolbarToggle(_ system: String, active: Bool, action: @escaping () -> Void) -> some View {
+    private func glassToggle(_ system: String, active: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: system)
-                .symbolVariant(.none)
-                .foregroundStyle(active ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(active ? AnyShapeStyle(Color(.systemBackground)) : AnyShapeStyle(.primary))
                 .contentTransition(.symbolEffect(.replace))
+                .frame(width: 56, height: 56)
+                .glassEffect(active ? .regular.tint(.primary).interactive() : .regular.interactive(), in: Circle())
         }
+        .buttonStyle(ScaleButtonStyle())
+        .sensoryFeedback(.impact(weight: .light), trigger: active)
     }
 
     private func row(index: Int, item: MediaItem) -> some View {
