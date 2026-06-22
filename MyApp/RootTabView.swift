@@ -28,10 +28,18 @@ struct RootTabView: View {
                 SearchView()
             }
         }
-        // Apply the accessory ALWAYS (stable identity). Toggling it on/off would change the
-        // TabView's type and re-create every tab — reloading Home and resetting scroll the moment
-        // playback starts ("refreshes the page"). MiniPlayer renders nothing when idle.
-        .tabViewBottomAccessory { MiniPlayer(namespace: npZoom) }
+        // Custom Liquid-Glass mini bar above the tab bar, shown ONLY while a track is loaded — so no
+        // empty bar when idle. The safeAreaInset modifier is ALWAYS applied (only its CONTENT is
+        // conditional), so the TabView keeps its identity and playback never reloads the tab content.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if player.currentItem != nil {
+                MiniPlayer(namespace: npZoom)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 4)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.82), value: player.currentItem != nil)
         // Now Playing zoom-expands from the mini player. `fullScreenCover` (not `.sheet`) is what
         // actually animates `.navigationTransition(.zoom)` on this build.
         .fullScreenCover(isPresented: $player.showNowPlaying) {

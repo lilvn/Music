@@ -165,23 +165,46 @@ struct SpinningDisc: View {
     let artURL: URL?
     let size: CGFloat
     let spinning: Bool
+    /// When set (0…1), the disc angle TRACKS the scrub position instead of free-spinning, so dragging
+    /// the playhead turns the disc. Folds back into the free spin continuously when the scrub ends.
+    var scrubProgress: Double? = nil
 
     /// Shared so the mini-bar CD and the carousel CD turn at exactly the same rate.
-    static let spinSpeed: Double = 52   // degrees / second
+    static let spinSpeed: Double = 52       // degrees / second
+    private static let scrubTurns: Double = 720   // degrees across the full scrub range
 
     @State private var spinBase: Double = 0
     @State private var spinRef = Date()
+    @State private var scrubAngleBase: Double = 0
+    @State private var scrubStartProgress: Double = 0
+    @State private var lastScrub: Double = 0
+
+    private func angle(at date: Date) -> Double {
+        if let p = scrubProgress {
+            return scrubAngleBase + (p - scrubStartProgress) * Self.scrubTurns
+        }
+        return spinning ? spinBase + date.timeIntervalSince(spinRef) * Self.spinSpeed : spinBase
+    }
 
     var body: some View {
-        TimelineView(.animation(paused: !spinning)) { context in
-            let angle = spinning
-                ? spinBase + context.date.timeIntervalSince(spinRef) * Self.spinSpeed
-                : spinBase
-            disc.rotationEffect(.degrees(angle))
+        TimelineView(.animation(paused: !spinning || scrubProgress != nil)) { context in
+            disc.rotationEffect(.degrees(angle(at: context.date)))
         }
         .onChange(of: spinning) { _, now in
             if now { spinRef = Date() }
             else { spinBase += Date().timeIntervalSince(spinRef) * Self.spinSpeed }
+        }
+        .onChange(of: scrubProgress) { old, p in
+            if let p {
+                if old == nil {   // scrub started — anchor on the current angle, no jump
+                    scrubAngleBase = spinning ? spinBase + Date().timeIntervalSince(spinRef) * Self.spinSpeed : spinBase
+                    scrubStartProgress = p
+                }
+                lastScrub = p
+            } else {              // scrub ended — fold the scrub rotation into the free spin
+                spinBase = scrubAngleBase + (lastScrub - scrubStartProgress) * Self.scrubTurns
+                spinRef = Date()
+            }
         }
     }
 
