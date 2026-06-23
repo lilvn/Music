@@ -7,12 +7,146 @@ enum DS {
     static let gridPad: CGFloat = 16       // horizontal padding for grids
     static let gridSpacing: CGFloat = 12   // spacing between grid cells
     static let cornerCard: CGFloat = 16    // album / artist cards
-    static let cornerArtwork: CGFloat = 18 // large artwork (album detail, now playing)
+    static let cornerArtwork: CGFloat = 26 // large artwork (album detail, now playing)
     static let cornerThumb: CGFloat = 10   // row thumbnails
     static let cornerMini: CGFloat = 11    // mini player artwork
     static let shadowRadius: CGFloat = 8
     static let shadowY: CGFloat = 4
     static let shadowOpacity: CGFloat = 0.12
+}
+
+// MARK: - Dynamic artwork gradient (Apple-Music-style art-derived wash)
+
+/// The album art rendered as a soft, saturated colour wash — the shared "dynamic gradient" used as the
+/// CD body, the detail / now-playing backgrounds, the mini-bar progress fill and the playing bars.
+/// Fills whatever frame it's given and, when `animated`, slowly drifts so the colours feel alive
+/// (Apple-Music / Dynamic-Island style). The blur is applied before the transforms so it's rasterised
+/// once and the motion is a cheap layer transform rather than a per-frame re-blur.
+struct ArtworkGradient: View {
+    let url: URL?
+    var blur: CGFloat = 40
+    var animated: Bool = true
+
+    private var image: some View {
+        LibraryImage(url: url, maxPixel: 240) { Color(white: 0.16) }
+            .aspectRatio(contentMode: .fill)
+            .blur(radius: blur, opaque: true)
+            .saturation(1.4)
+    }
+
+    var body: some View {
+        if animated {
+            // Lava-lamp flow: a slow CONTINUOUS rotation plus a lazy elliptical drift and gentle
+            // breathing, so the colours keep flowing in one direction rather than pulsing back and
+            // forth. Offsets are proportional to the view, so it works at any size (full-screen
+            // background → 36pt CD). 30fps keeps it cheap; the caller clips/masks the overflow.
+            GeometryReader { geo in
+                let maxSide = max(geo.size.width, geo.size.height)
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                    let t = context.date.timeIntervalSinceReferenceDate
+                    image
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .scaleEffect(1.42 + 0.1 * sin(t * 0.31))
+                        .rotationEffect(.degrees(t * 3.5))
+                        .offset(x: maxSide * 0.09 * sin(t * 0.23),
+                                y: maxSide * 0.09 * cos(t * 0.19))
+                }
+            }
+        } else {
+            image.scaleEffect(1.06)
+        }
+    }
+}
+
+/// Animated "now playing" bars filled with the album's dynamic gradient — the Apple-Music / Dynamic-
+/// Island style playing indicator that replaces the SF `waveform` glyph in lists.
+struct PlayingIndicator: View {
+    let url: URL?
+    let active: Bool
+    private let count = 4
+
+    var body: some View {
+        TimelineView(.animation(paused: !active)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            ArtworkGradient(url: url, blur: 4, animated: false)
+                .saturation(1.3)
+                .mask {
+                    HStack(spacing: 2.5) {
+                        ForEach(0..<count, id: \.self) { i in
+                            Capsule().frame(width: 2.5, height: barHeight(i, t))
+                        }
+                    }
+                    .frame(height: 16)
+                }
+        }
+        .frame(width: 20, height: 16)
+    }
+
+    private func barHeight(_ i: Int, _ t: Double) -> CGFloat {
+        guard active else { return 4 }
+        let beat = sin(t * 5.5 + Double(i) * 1.1) + 0.5 * sin(t * 8.7 + Double(i) * 0.7)
+        let v = max(0, min(1, (beat / 1.5 + 1) / 2))   // 0…1, layered for a beat-like pulse
+        return 4 + CGFloat(v) * 12                      // 4…16
+    }
+}
+
+/// Full-bleed dynamic background derived from the artwork, toned toward the system background so the
+/// foreground (adaptive `.primary` / `.secondary` text) stays legible in both light and dark mode.
+struct ArtworkBackground: View {
+    let url: URL?
+    var body: some View {
+        ArtworkGradient(url: url, blur: 55)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .overlay(Color(.systemBackground).opacity(0.5))
+            .overlay(
+                LinearGradient(colors: [Color(.systemBackground).opacity(0.25),
+                                        Color(.systemBackground).opacity(0.0),
+                                        Color(.systemBackground).opacity(0.55)],
+                               startPoint: .top, endPoint: .bottom))
+            .ignoresSafeArea()
+    }
+}
+
+/// Cross-fades the artwork background between tracks. The ZStack + `.animation(value:)` is what makes
+/// the `.id` + `.transition` actually fire when used inside a `.background` / `.presentationBackground`.
+struct CrossfadeBackground: View {
+    let url: URL?
+    var body: some View {
+        ZStack {
+            ArtworkBackground(url: url)
+                .id(url)
+                .transition(.opacity)
+        }
+        .animation(.easeInOut(duration: 0.55), value: url)
+    }
+}
+
+/// Shown wherever an item has no artwork — a subtle dark panel with the custom heart-speaker mark.
+/// Falls back to an SF Symbol until the `ArtworkPlaceholder` image asset is added. Fills its frame,
+/// so it reads correctly at every size (row thumbnail → full now-playing art → cover-flow reflection).
+struct ArtworkPlaceholder: View {
+    var body: some View {
+        GeometryReader { geo in
+            let s = min(geo.size.width, geo.size.height)
+            ZStack {
+                LinearGradient(colors: [Color(white: 0.22), Color(white: 0.12)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                if let mark = UIImage(named: "ArtworkPlaceholder") {
+                    Image(uiImage: mark)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: max(s * 0.12, 14), height: max(s * 0.12, 14))
+                        .opacity(0.9)
+                } else {
+                    Image(systemName: "music.note")
+                        .font(.system(size: s * 0.26, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.32))
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+    }
 }
 
 // MARK: - Native push navigation + zoom card-expand
@@ -29,15 +163,33 @@ extension EnvironmentValues {
     }
 }
 
+/// Lets a view deep in a `LibraryStack` push a route programmatically (e.g. from a context menu
+/// "View Album / View Artist"), reusing the same destination + zoom as a tapped card.
+private struct LibraryPushKey: EnvironmentKey {
+    static let defaultValue: (LibraryRoute) -> Void = { _ in }
+}
+extension EnvironmentValues {
+    var libraryPush: (LibraryRoute) -> Void {
+        get { self[LibraryPushKey.self] }
+        set { self[LibraryPushKey.self] = newValue }
+    }
+}
+
 /// A tab's root `NavigationStack`. Detail routes PUSH (so the tab bar + mini player stay above them)
 /// and zoom-expand out of the tapped card. One namespace per stack, threaded to cards via the
 /// environment; nested pushes (an album opened from an artist) reuse the same destination + zoom.
 struct LibraryStack<Root: View>: View {
+    /// Optional externally-owned path, so a parent (e.g. RootTabView) can push into this stack — used
+    /// to navigate from Now Playing while keeping the tab bar + mini player.
+    var externalPath: Binding<NavigationPath>? = nil
     @ViewBuilder var root: () -> Root
     @Namespace private var ns
+    @State private var internalPath = NavigationPath()
+
+    private var pathBinding: Binding<NavigationPath> { externalPath ?? $internalPath }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: pathBinding) {
             root()
                 .navigationDestination(for: LibraryRoute.self) { route in
                     destinationView(for: route)
@@ -45,6 +197,7 @@ struct LibraryStack<Root: View>: View {
                 }
         }
         .environment(\.zoomNamespace, ns)
+        .environment(\.libraryPush) { pathBinding.wrappedValue.append($0) }
     }
 }
 
@@ -116,12 +269,7 @@ struct AlbumCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             LibraryImage(url: client.artworkURL(for: album, size: 400), maxPixel: 400) {
-                Color(.systemGray6)
-                    .overlay {
-                        Image(systemName: "music.note")
-                            .font(.title2)
-                            .foregroundStyle(Color(.systemGray4))
-                    }
+                ArtworkPlaceholder()
             }
             .aspectRatio(1, contentMode: .fit)
             .frame(maxWidth: .infinity)
@@ -196,6 +344,8 @@ struct SongRow: View {
     var onAddToPlaylist: (() -> Void)? = nil
     var onRemove: (() -> Void)? = nil
     var large: Bool = false
+    /// When supplied, the current-track glass highlight glides between rows (matchedGeometry).
+    var highlightNamespace: Namespace.ID? = nil
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
 
@@ -210,6 +360,22 @@ struct SongRow: View {
         }
         .padding(.horizontal, DS.hPad)
         .frame(minHeight: large ? 68 : 56)
+        // Liquid-glass "magnifier" highlight on the currently-playing row (consistent across all lists).
+        .background {
+            if isCurrent {
+                if let ns = highlightNamespace {
+                    Color.clear
+                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
+                        .padding(.horizontal, 8)
+                        .matchedGeometryEffect(id: "songHighlight", in: ns)
+                } else {
+                    Color.clear
+                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
+                        .padding(.horizontal, 8)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
         .contextMenu {
@@ -239,10 +405,11 @@ struct SongRow: View {
         } else {
             Group {
                 if isCurrent {
-                    Image(systemName: player.isPlaying ? "waveform" : "pause.fill")
-                        .font(.caption)
-                        .symbolEffect(.variableColor.iterative.dimInactiveLayers,
-                                      isActive: isCurrent && player.isPlaying)
+                    if player.isPlaying {
+                        PlayingIndicator(url: client.artworkURL(for: song, size: 160), active: true)
+                    } else {
+                        Image(systemName: "pause.fill").font(.caption).foregroundStyle(.primary)
+                    }
                 } else if let num = trackNumber ?? song.indexNumber {
                     Text("\(num)")
                         .font(.footnote).monospacedDigit()
@@ -270,10 +437,7 @@ struct SongRow: View {
     @ViewBuilder
     private var trailing: some View {
         if isCurrent && showAlbumArt {
-            Image(systemName: "waveform")
-                .font(.caption)
-                .foregroundStyle(.primary)
-                .symbolEffect(.variableColor.iterative.dimInactiveLayers, isActive: player.isPlaying)
+            PlayingIndicator(url: client.artworkURL(for: song, size: 160), active: player.isPlaying)
         }
         if let dur = song.durationSeconds {
             Text(dur.formattedDuration)
@@ -386,6 +550,7 @@ struct CenteredState<Accessory: View>: View {
 struct ArtistDetailView: View {
     let artist: MediaItem
     @Environment(JellyfinClient.self) private var client
+    @Environment(Player.self) private var player
     @State private var albums: [MediaItem] = []
     @State private var isLoading = true
 
@@ -396,6 +561,12 @@ struct ArtistDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 heroHeader
+
+                if !albums.isEmpty {
+                    playRow
+                        .padding(.horizontal, DS.hPad)
+                        .padding(.top, 14)
+                }
 
                 if isLoading {
                     ProgressView().padding(48)
@@ -421,6 +592,33 @@ struct ArtistDetailView: View {
         .task {
             albums = (try? await client.fetchAlbums(artistId: artist.id)) ?? []
             isLoading = false
+        }
+    }
+
+    /// Play / Shuffle all of the artist's songs (fetched on tap, in album order).
+    private var playRow: some View {
+        HStack(spacing: 12) {
+            artistAction(title: "Play", icon: "play.fill") { playAll(shuffled: false) }
+            artistAction(title: "Shuffle", icon: "shuffle") { playAll(shuffled: true) }
+        }
+    }
+
+    private func artistAction(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .glassEffect(.regular.interactive(), in: .capsule)
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+
+    private func playAll(shuffled: Bool) {
+        Task {
+            let songs = (try? await client.fetchArtistSongs(artistId: artist.id)) ?? []
+            if !songs.isEmpty { player.play(items: songs, from: 0, shuffled: shuffled) }
         }
     }
 

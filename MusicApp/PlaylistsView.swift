@@ -15,31 +15,45 @@ struct PlaylistsView: View {
     var body: some View {
         LibraryStack {
             ScrollView {
-                if playlists.isEmpty && isLoading {
-                    CenteredState(systemImage: nil, title: "Loading", loading: true)
-                } else if playlists.isEmpty && loadFailed {
-                    CenteredState(systemImage: "wifi.exclamationmark", title: "Couldn't load playlists") {
-                        Button("Try Again") { Task { await load() } }.buttonStyle(.bordered)
-                    }
-                } else if playlists.isEmpty {
-                    CenteredState(systemImage: "music.note.list", title: "No playlists yet")
-                } else {
-                    LazyVGrid(columns: cols, spacing: DS.gridSpacing + 4) {
-                        ForEach(playlists) { p in
-                            LibraryLink(route: .playlist(p)) { PlaylistCard(playlist: p) }
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Playlists")
+                            .font(.largeTitle).fontWeight(.bold)
+                        Spacer()
+                        Button { newName = ""; showCreate = true } label: {
+                            Image(systemName: "plus")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .frame(width: 40, height: 40)
+                                .contentShape(Rectangle())
                         }
                     }
-                    .padding(.horizontal, DS.gridPad)
-                    .padding(.top, 4)
+                    .padding(.horizontal, DS.hPad)
+                    .padding(.top, 8)
+                    .padding(.bottom, 14)
+
+                    if playlists.isEmpty && isLoading {
+                        CenteredState(systemImage: nil, title: "Loading", loading: true)
+                    } else if playlists.isEmpty && loadFailed {
+                        CenteredState(systemImage: "wifi.exclamationmark", title: "Couldn't load playlists") {
+                            Button("Try Again") { Task { await load() } }.buttonStyle(.bordered)
+                        }
+                    } else if playlists.isEmpty {
+                        CenteredState(systemImage: "music.note.list", title: "No playlists yet")
+                    } else {
+                        LazyVGrid(columns: cols, spacing: DS.gridSpacing + 4) {
+                            ForEach(playlists) { p in
+                                LibraryLink(route: .playlist(p)) { PlaylistCard(playlist: p) }
+                            }
+                        }
+                        .padding(.horizontal, DS.gridPad)
+                    }
                 }
             }
             .scrollIndicators(.hidden)
-            .navigationTitle("Playlists")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { newName = ""; showCreate = true } label: { Image(systemName: "plus") }
-                }
-            }
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            // Title lives in the scroll content (Home-style), so no header pins while scrolling.
+            .toolbar(.hidden, for: .navigationBar)
             .alert("New Playlist", isPresented: $showCreate) {
                 TextField("Name", text: $newName)
                 Button("Cancel", role: .cancel) {}
@@ -107,6 +121,7 @@ struct PlaylistDetailView: View {
     @State private var tracks: [MediaItem] = []
     @State private var isLoading = true
     @State private var editMode: EditMode = .inactive
+    @Namespace private var trackHighlightNS
 
     var body: some View {
         List {
@@ -135,7 +150,8 @@ struct PlaylistDetailView: View {
                             onTap: { player.play(items: tracks, from: index) },
                             onPlayNext: { player.playNext(track) },
                             onPlayLast: { player.playLast(track) },
-                            onRemove: { remove(track) })
+                            onRemove: { remove(track) },
+                            highlightNamespace: trackHighlightNS)
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                         .listRowBackground(Color.clear)
                         .trackSwipeActions(onPlayNext: { player.playNext(track) },
@@ -147,6 +163,7 @@ struct PlaylistDetailView: View {
         }
         .listStyle(.plain)
         .scrollIndicators(.hidden)
+        .animation(.spring(response: 0.4, dampingFraction: 0.82), value: player.currentItem?.id)
         .navigationBarTitleDisplayMode(.inline)
         .environment(\.editMode, $editMode)
         .toolbar {

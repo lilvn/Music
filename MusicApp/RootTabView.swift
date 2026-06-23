@@ -9,6 +9,7 @@ struct RootTabView: View {
     @Environment(JellyfinClient.self) private var client
     @State private var selection: RootTab = .home
     @State private var spotlightRoute: LibraryRoute?
+    @State private var homePath = NavigationPath()
     @Namespace private var npZoom
 
     var body: some View {
@@ -16,7 +17,7 @@ struct RootTabView: View {
 
         TabView(selection: $selection) {
             Tab("Home", systemImage: "house.fill", value: RootTab.home) {
-                HomeView()
+                HomeView(navPath: $homePath)
             }
             Tab("Albums", systemImage: "square.stack.fill", value: RootTab.albums) {
                 AlbumsView()
@@ -28,18 +29,14 @@ struct RootTabView: View {
                 SearchView()
             }
         }
-        // Custom Liquid-Glass mini bar above the tab bar, shown ONLY while a track is loaded — so no
-        // empty bar when idle. The safeAreaInset modifier is ALWAYS applied (only its CONTENT is
-        // conditional), so the TabView keeps its identity and playback never reloads the tab content.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        // Liquid-Glass mini bar in the native iOS 26 bottom accessory — the system floats it correctly
+        // ABOVE the floating tab bar (a plain safeAreaInset overlaps it) and supplies the glass. Shown
+        // ONLY while a track is loaded, so there's no empty bar when idle.
+        .tabViewBottomAccessory {
             if player.currentItem != nil {
                 MiniPlayer(namespace: npZoom)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 4)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.82), value: player.currentItem != nil)
         // Now Playing zoom-expands from the mini player. `fullScreenCover` (not `.sheet`) is what
         // actually animates `.navigationTransition(.zoom)` on this build.
         .fullScreenCover(isPresented: $player.showNowPlaying) {
@@ -61,7 +58,17 @@ struct RootTabView: View {
                     }
             }
         }
+        // Now Playing asked to view an album/artist: it closed itself first; push it into the Home
+        // tab (so the tab bar + mini player stay) once the player has finished dismissing.
+        .onChange(of: player.showNowPlaying) { _, shown in
+            guard !shown, let route = player.pendingRoute else { return }
+            player.pendingRoute = nil
+            selection = .home
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { homePath.append(route) }
+        }
         .task { await SpotlightIndexer.reindex(client) }
+        // No local session yet (fresh install) → show the server's last-played track in the mini bar.
+        .task { await player.restoreFromServerIfNeeded() }
         .onContinueUserActivity(CSSearchableItemActionType) { activity in
             guard let id = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return }
             Task { spotlightRoute = await SpotlightIndexer.route(forIdentifier: id, client: client) }

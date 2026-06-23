@@ -72,8 +72,13 @@ struct LibraryImage<Placeholder: View>: View {
                 placeholder
             }
         }
+        // Keyed on `url`, so a changing source (e.g. the mini player when the track changes) actually
+        // reloads instead of holding the previous track's art. A cached hit swaps instantly; a miss
+        // clears first so stale art never lingers under the new title.
         .task(id: url) {
-            guard image == nil, let url else { return }
+            guard let url else { image = nil; return }
+            if let cached = ImageStore.shared.cached(url) { image = cached; return }
+            image = nil
             let loaded = await ImageStore.shared.load(url, maxPixel: maxPixel)
             if !Task.isCancelled { image = loaded }
         }

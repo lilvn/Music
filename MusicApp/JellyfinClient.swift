@@ -119,6 +119,17 @@ final class JellyfinClient {
         return try await fetchItems(path: "Users/\(userId)/Items", query: items)
     }
 
+    /// All songs by an album-artist, in album / track order — powers the artist page Play / Shuffle.
+    func fetchArtistSongs(artistId: String) async throws -> [MediaItem] {
+        try await fetchItems(path: "Users/\(userId)/Items", query: [
+            q("AlbumArtistIds", artistId),
+            q("IncludeItemTypes", "Audio"),
+            q("Recursive", "true"),
+            q("SortBy", "Album,ParentIndexNumber,IndexNumber,SortName"),
+            q("Fields", "RunTimeTicks,AlbumArtist,Album,AlbumId"),
+        ])
+    }
+
     /// Music genres in the library (for the Albums genre filter).
     func fetchMusicGenres() async throws -> [MediaItem] {
         try await fetchItems(path: "MusicGenres", query: [
@@ -191,6 +202,18 @@ final class JellyfinClient {
             q("Limit", "\(limit)"),
             q("Recursive", "true"),
             q("Fields", "PrimaryImageAspectRatio,AlbumArtist,Album,AlbumId,RunTimeTicks"),
+            q("ImageTypeLimit", "1"),
+            q("EnableImageTypes", "Primary"),
+        ])
+    }
+
+    /// Server-generated "instant mix" of songs similar to `itemId` — powers Autoplay when the queue
+    /// runs out (most-relevant first).
+    func fetchInstantMix(itemId: String, limit: Int = 20) async throws -> [MediaItem] {
+        try await fetchItems(path: "Items/\(itemId)/InstantMix", query: [
+            q("UserId", userId),
+            q("Limit", "\(limit)"),
+            q("Fields", "RunTimeTicks,AlbumArtist,Album,AlbumId"),
             q("ImageTypeLimit", "1"),
             q("EnableImageTypes", "Primary"),
         ])

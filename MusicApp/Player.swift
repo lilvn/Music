@@ -1,6 +1,9 @@
 import Foundation
 import AVFoundation
 import Observation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 #if canImport(MediaPlayer)
 import MediaPlayer
@@ -27,7 +30,26 @@ final class Player {
     /// Name of the current audio output (e.g. "iPhone", "AirPods Pro", an AirPlay device).
     var outputRouteName = "iPhone"
 
+    /// Live scrub state, published so EVERY disc/progress view (mini bar + cover-flow CD) tracks the
+    /// same drag in lockstep. `scrubProgress` is 0…1 and only meaningful while `isScrubbing`.
+    var isScrubbing = false
+    var scrubProgress: Double = 0
+
+    /// Autoplay: when the queue runs out, keep playing a server-generated instant mix of similar songs.
+    var autoplayEnabled = true
+    /// Upcoming Autoplay songs (an instant mix) — shown under the Up Next list, played when the queue ends.
+    var autoplayTracks: [MediaItem] = []
+
+    /// A detail route requested from Now Playing; RootTabView presents it AFTER the player closes.
+    var pendingRoute: LibraryRoute?
+
+    /// Releases the user explicitly chose to play (drives the home "Recently Played" shelf) — NOT
+    /// auto-advance / Autoplay / queue jumps.
+    var recentManualPlays: [ManualPlay] = []
+
     var currentItem: MediaItem? { queue.currentItem }
+    /// Forward is allowed if there's a next track OR Autoplay can take over at the end of the queue.
+    var canGoNext: Bool { queue.hasNext || (autoplayEnabled && !autoplayTracks.isEmpty) }
 
     @ObservationIgnored private let client: JellyfinClient
 
@@ -52,6 +74,15 @@ final class Player {
     @ObservationIgnored private var reportedItemId: String?
     @ObservationIgnored private var progressTick = 0
     @ObservationIgnored private var wasPlayingBeforeScrub = false
+    /// Position to seek to once the (lazily-built) player becomes ready — resumes a restored session.
+    @ObservationIgnored private var pendingSeekTime: Double?
+    @ObservationIgnored private let sessionDefaultsKey = "lastPlaybackSession"
+    @ObservationIgnored private var autoplaySeedId: String?
+    @ObservationIgnored private let autoplayDefaultsKey = "autoplayEnabled"
+    @ObservationIgnored private let manualPlaysKey = "recentManualPlays"
+#if os(iOS)
+    @ObservationIgnored private let skipFeedback = UIImpactFeedbackGenerator(style: .medium)
+#endif
 
     init(client: JellyfinClient) {
         self.client = client
@@ -59,6 +90,12 @@ final class Player {
         setupRemoteControls()
         setupNotifications()
         updateOutputRoute()
+        autoplayEnabled = UserDefaults.standard.object(forKey: autoplayDefaultsKey) as? Bool ?? true
+        if let data = UserDefaults.standard.data(forKey: manualPlaysKey),
+           let plays = try? JSONDecoder().decode([ManualPlay].self, from: data) {
+            recentManualPlays = plays
+        }
+        restoreSession()   // show the last-played track in the mini bar (paused, ready to resume)
     }
 
     deinit {
@@ -70,6 +107,10 @@ final class Player {
     /// Start a brand-new playback context from `items`. Resets shuffle/queue state.
     func play(items: [MediaItem], from index: Int = 0, shuffled: Bool = false) {
         guard !items.isEmpty else { return }
+        pendingSeekTime = nil   // a fresh context never resumes the restored position
+        let clicked = min(max(index, 0), items.count - 1)
+        recordManualPlay(track: items[clicked], isAlbum: index == 0 && items.count > 1)
+        skipHaptic()
         queue.originalItems = items
         if shuffled {
             queue.items = items.shuffled()
@@ -81,15 +122,27 @@ final class Player {
             queue.isShuffled = false
         }
         rebuild(at: queue.currentIndex, autoplay: true)
+        autoplaySeedId = nil
+        Task { await refreshAutoplay() }
     }
 
     /// Jump to an existing item in the current queue (e.g. tapping in the Up Next list).
     func play(at index: Int) {
         guard queue.items.indices.contains(index) else { return }
+        pendingSeekTime = nil
+        skipHaptic()
         rebuild(at: index, autoplay: true)
     }
 
     func togglePlayPause() {
+        // A restored session has its queue but no live player yet — build it at the saved spot,
+        // resume the saved position, and play.
+        if player == nil {
+            guard queue.currentItem != nil else { return }
+            pendingSeekTime = currentTime > 0 ? currentTime : nil
+            rebuild(at: queue.currentIndex, autoplay: true)
+            return
+        }
         guard let player else { return }
         if isPlaying {
             player.pause()
@@ -104,6 +157,7 @@ final class Player {
             if reportedItemId == nil { reportStart() } else { reportProgress(paused: false) }
         }
         updateNowPlayingRate()
+        saveSession()
     }
 
     func seek(to time: Double) {
@@ -113,10 +167,17 @@ final class Player {
         currentTime = clamped
         seekSuppressUntil = Date().addingTimeInterval(0.5)
         updateNowPlayingElapsed()
+        saveSession()
     }
 
     func nextTrack() {
-        guard let player else { return }
+        skipHaptic()
+        guard let player else {
+            // Restored session with no live player yet — build the next track and play.
+            if let n = nextIndex(after: queue.currentIndex) { pendingSeekTime = nil; rebuild(at: n, autoplay: true) }
+            else if autoplayEnabled { Task { await continueWithAutoplay() } }
+            return
+        }
         // If the next track is already pre-rolled, advance to it instantly; otherwise rebuild.
         if let n = nextIndex(after: queue.currentIndex) {
             if let look = lookaheadItem, lookaheadIndex == n {
@@ -125,10 +186,35 @@ final class Player {
             } else {
                 rebuild(at: n, autoplay: intendedPlaying || isPlaying)
             }
+        } else if autoplayEnabled {
+            // Last track + Autoplay on → continue with the instant mix.
+            Task { await continueWithAutoplay() }
         }
     }
 
+    /// Tapping a track in the Autoplay list jumps to it (the whole mix is appended to the queue).
+    func playAutoplayFrom(_ index: Int) {
+        guard autoplayTracks.indices.contains(index) else { return }
+        skipHaptic()
+        let mix = autoplayTracks
+        autoplayTracks = []
+        autoplaySeedId = nil
+        let startIndex = queue.items.count
+        queue.items.append(contentsOf: mix)
+        queue.originalItems = queue.items
+        pendingSeekTime = nil
+        rebuild(at: startIndex + index, autoplay: true)
+        Task { await refreshAutoplay() }
+    }
+
     func previousTrack() {
+        skipHaptic()
+        guard player != nil else {
+            // Restored session with no live player yet — start the current track.
+            pendingSeekTime = nil
+            rebuild(at: queue.currentIndex, autoplay: true)
+            return
+        }
         if currentTime > 5 {
             seek(to: 0)
         } else if queue.currentIndex > 0 {
@@ -142,6 +228,24 @@ final class Player {
 
     func skipForward(by seconds: Double = 15) { seek(to: min(currentTime + seconds, duration)) }
     func skipBackward(by seconds: Double = 15) { seek(to: max(currentTime - seconds, 0)) }
+
+    private func skipHaptic() {
+#if os(iOS)
+        skipFeedback.impactOccurred()
+        skipFeedback.prepare()   // keep it warm for the next skip
+#endif
+    }
+
+    /// Record a release the user explicitly chose to play, for the home "Recently Played" shelf.
+    private func recordManualPlay(track: MediaItem, isAlbum: Bool) {
+        let entry = ManualPlay(track: track, isAlbum: isAlbum)
+        recentManualPlays.removeAll { $0.id == entry.id }
+        recentManualPlays.insert(entry, at: 0)
+        if recentManualPlays.count > 24 { recentManualPlays = Array(recentManualPlays.prefix(24)) }
+        if let data = try? JSONEncoder().encode(recentManualPlays) {
+            UserDefaults.standard.set(data, forKey: manualPlaysKey)
+        }
+    }
 
     func toggleShuffle() { setShuffle(!queue.isShuffled) }
 
@@ -159,6 +263,8 @@ final class Player {
         isLoading = false
         currentTime = 0
         duration = 0
+        pendingSeekTime = nil
+        clearSession()
         clearNowPlayingInfo()
     }
 
@@ -205,12 +311,48 @@ final class Player {
         if index < queue.currentIndex { queue.currentIndex -= 1 }
         queue.originalItems.removeAll { $0.id == removed.id }
         resyncLookahead()
+        saveSession()
+    }
+
+    /// Reorder Up Next (drag to move), keeping the current track's index in sync. Implements the
+    /// `move(fromOffsets:toOffset:)` semantics without pulling SwiftUI into the model layer.
+    func moveInQueue(from source: IndexSet, to destination: Int) {
+        let current = queue.currentItem
+        let sorted = source.sorted()
+        let moving = sorted.map { queue.items[$0] }
+        var result = queue.items
+        for i in sorted.reversed() { result.remove(at: i) }
+        let insertIndex = destination - sorted.filter { $0 < destination }.count
+        result.insert(contentsOf: moving, at: min(max(0, insertIndex), result.count))
+        queue.items = result
+        if !queue.isShuffled { queue.originalItems = queue.items }
+        if let current, let idx = queue.items.firstIndex(where: { $0.id == current.id }) {
+            queue.currentIndex = idx
+        }
+        resyncLookahead()
+        saveSession()
+    }
+
+    /// Warm the decoded-image cache for the current track and its neighbours, so skipping never
+    /// flashes a placeholder anywhere (now playing, mini bar, lists).
+    private func prefetchArtwork() {
+        for i in [queue.currentIndex - 1, queue.currentIndex, queue.currentIndex + 1]
+        where queue.items.indices.contains(i) {
+            let item = queue.items[i]
+            for size in [1000, 400, 160] {
+                guard let url = client.artworkURL(for: item, size: size) else { continue }
+                let maxPixel = CGFloat(size)
+                Task.detached(priority: .utility) { _ = await ImageStore.shared.load(url, maxPixel: maxPixel) }
+            }
+        }
     }
 
     // MARK: - Scrubbing (pause while the user holds the playhead)
 
     func beginScrubbing() {
         wasPlayingBeforeScrub = isPlaying
+        isScrubbing = true
+        scrubProgress = duration > 0 ? min(max(currentTime / duration, 0), 1) : 0
         if isPlaying {
             player?.pause()
             isPlaying = false
@@ -218,7 +360,13 @@ final class Player {
         }
     }
 
+    /// Called continuously as the user drags any scrubber, so the disc(s) turn with the playhead.
+    func updateScrubbing(progress: Double) {
+        scrubProgress = min(max(progress, 0), 1)
+    }
+
     func endScrubbing(to time: Double) {
+        isScrubbing = false
         seek(to: time)
         if wasPlayingBeforeScrub {
             player?.play()
@@ -227,6 +375,68 @@ final class Player {
         }
         wasPlayingBeforeScrub = false
         reportProgress(paused: !isPlaying)
+    }
+
+    // MARK: - Session persistence (restore the last-played track across launches)
+
+    private struct PersistedSession: Codable {
+        var items: [MediaItem]
+        var originalItems: [MediaItem]
+        var index: Int
+        var time: Double
+        var isShuffled: Bool
+        var repeatMode: String
+    }
+
+    /// Snapshot the current queue + position so the next launch can show it in the mini bar.
+    private func saveSession() {
+        guard !queue.items.isEmpty, queue.items.indices.contains(queue.currentIndex) else { return }
+        let session = PersistedSession(
+            items: queue.items,
+            originalItems: queue.originalItems,
+            index: queue.currentIndex,
+            time: max(0, currentTime),
+            isShuffled: queue.isShuffled,
+            repeatMode: queue.repeatMode.rawValue
+        )
+        guard let data = try? JSONEncoder().encode(session) else { return }
+        UserDefaults.standard.set(data, forKey: sessionDefaultsKey)
+    }
+
+    /// Load the last session into the queue WITHOUT building a player or auto-playing — so the mini
+    /// bar shows the track (paused) and the first play resumes it at the saved position.
+    private func restoreSession() {
+        guard let data = UserDefaults.standard.data(forKey: sessionDefaultsKey),
+              let session = try? JSONDecoder().decode(PersistedSession.self, from: data),
+              !session.items.isEmpty, session.items.indices.contains(session.index) else { return }
+        queue.items = session.items
+        queue.originalItems = session.originalItems.isEmpty ? session.items : session.originalItems
+        queue.currentIndex = session.index
+        queue.isShuffled = session.isShuffled
+        queue.repeatMode = RepeatMode(rawValue: session.repeatMode) ?? .off
+        currentTime = max(0, session.time)
+        duration = session.items[session.index].durationSeconds ?? 0
+        isPlaying = false
+        intendedPlaying = false
+    }
+
+    private func clearSession() {
+        UserDefaults.standard.removeObject(forKey: sessionDefaultsKey)
+    }
+
+    /// When there's no locally-saved session (e.g. a fresh install), seed the mini bar with the last
+    /// track the server has on record, so launch isn't blank. Paused — the first play starts it.
+    func restoreFromServerIfNeeded() async {
+        guard queue.items.isEmpty, player == nil else { return }
+        guard let track = (try? await client.fetchRecentlyPlayed(limit: 1))?.first else { return }
+        guard queue.items.isEmpty, player == nil else { return }   // nothing started while we fetched
+        queue.items = [track]
+        queue.originalItems = [track]
+        queue.currentIndex = 0
+        currentTime = 0
+        duration = track.durationSeconds ?? 0
+        isPlaying = false
+        intendedPlaying = false
     }
 
     // MARK: - Shuffle
@@ -304,6 +514,8 @@ final class Player {
         setupObservers(on: qp)
         observeStatus(of: cur)
         updateNowPlayingInfo()
+        saveSession()
+        prefetchArtwork()
     }
 
     /// Make sure the next track is pre-rolled into the queue for a gapless hand-off.
@@ -346,7 +558,10 @@ final class Player {
                 }
                 self.updateNowPlayingElapsed()
                 self.progressTick += 1
-                if self.progressTick % 20 == 0 { self.reportProgress(paused: false) }   // ~every 10s
+                if self.progressTick % 20 == 0 {                  // ~every 10s
+                    self.reportProgress(paused: false)
+                    self.saveSession()
+                }
             }
         }
 
@@ -383,6 +598,10 @@ final class Player {
                     self.isLoading = false
                     let d = it.duration.seconds
                     if d.isFinite, !d.isNaN, d > 0 { self.duration = d }
+                    if let t = self.pendingSeekTime {   // resume a restored session at its saved spot
+                        self.pendingSeekTime = nil
+                        self.seek(to: t)
+                    }
                     if self.intendedPlaying, !self.isPlaying {
                         self.player?.play()
                         self.isPlaying = true
@@ -429,15 +648,68 @@ final class Player {
         updateNowPlayingInfo()
         observeStatus(of: item)                // refresh duration once fully ready
         ensureLookahead()                      // pre-roll the following track
+        saveSession()
+        prefetchArtwork()
     }
 
     private func handleQueueEnd() {
-        // Whole queue finished (repeat off) → reset to the top, paused and ready to replay.
         reportStop()
+        if autoplayEnabled {
+            Task { await continueWithAutoplay() }
+            return
+        }
+        // Autoplay off → reset to the top, paused and ready to replay.
         isPlaying = false
         intendedPlaying = false
         queue.currentIndex = 0
         rebuild(at: 0, autoplay: false)
+    }
+
+    // MARK: - Autoplay (continue with an instant mix when the queue ends)
+
+    /// Persist + apply the Autoplay toggle.
+    func setAutoplay(_ on: Bool) {
+        autoplayEnabled = on
+        UserDefaults.standard.set(on, forKey: autoplayDefaultsKey)
+        if on {
+            Task { await refreshAutoplay() }
+        } else {
+            autoplayTracks = []
+            autoplaySeedId = nil
+        }
+    }
+
+    /// Refresh the upcoming Autoplay tracks — an instant mix seeded by the last queued track, with
+    /// anything already queued filtered out. No-op if the seed hasn't changed.
+    func refreshAutoplay() async {
+        guard autoplayEnabled, let seed = queue.items.last else {
+            autoplayTracks = []; autoplaySeedId = nil; return
+        }
+        if seed.id == autoplaySeedId, !autoplayTracks.isEmpty { return }
+        autoplaySeedId = seed.id
+        let mix = (try? await client.fetchInstantMix(itemId: seed.id, limit: 20)) ?? []
+        guard autoplaySeedId == seed.id else { return }   // seed changed mid-fetch
+        let queued = Set(queue.items.map(\.id))
+        autoplayTracks = mix.filter { !queued.contains($0.id) }
+    }
+
+    private func continueWithAutoplay() async {
+        if autoplayTracks.isEmpty { await refreshAutoplay() }
+        guard autoplayEnabled, !autoplayTracks.isEmpty else {
+            isPlaying = false
+            intendedPlaying = false
+            queue.currentIndex = 0
+            rebuild(at: 0, autoplay: false)
+            return
+        }
+        let mix = autoplayTracks
+        autoplayTracks = []
+        autoplaySeedId = nil
+        let startIndex = queue.items.count
+        queue.items.append(contentsOf: mix)
+        queue.originalItems = queue.items
+        rebuild(at: startIndex, autoplay: true)
+        await refreshAutoplay()   // seed the following batch
     }
 
     private func readyDuration(_ item: AVPlayerItem) -> Double {
@@ -479,6 +751,9 @@ final class Player {
         outputRouteName = AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName ?? "iPhone"
 #endif
     }
+
+    /// Re-read the current output device name (e.g. when Now Playing appears).
+    func refreshOutputRoute() { updateOutputRoute() }
 
     private func setupNotifications() {
 #if os(iOS) || os(tvOS)

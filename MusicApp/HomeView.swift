@@ -1,17 +1,19 @@
 import SwiftUI
 
 struct HomeView: View {
+    /// Externally-owned nav path so Now Playing can push album/artist into this tab.
+    var navPath: Binding<NavigationPath>? = nil
     @Environment(JellyfinClient.self) private var client
+    @Environment(Player.self) private var player
 
     @State private var recentlyAdded: [MediaItem] = []
-    @State private var recentlyPlayed: [MediaItem] = []
     @State private var featured: [MediaItem] = []
     @State private var artists: [MediaItem] = []
     @State private var loaded = false
     @State private var showSettings = false
 
     var body: some View {
-        LibraryStack {
+        LibraryStack(externalPath: navPath) {
             GeometryReader { geo in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 30) {
@@ -22,8 +24,8 @@ struct HomeView: View {
                         if !recentlyAdded.isEmpty {
                             FeaturedShelf(title: "Recently Added", albums: recentlyAdded)
                         }
-                        if !recentlyPlayed.isEmpty {
-                            RecentlyPlayedShelf(tracks: recentlyPlayed)
+                        if !player.recentManualPlays.isEmpty {
+                            RecentlyPlayedShelf(plays: player.recentManualPlays)
                         }
                         if !artists.isEmpty {
                             ArtistsShelf(artists: artists)
@@ -41,7 +43,7 @@ struct HomeView: View {
                     .padding(.bottom, 24)
                 }
                 .scrollIndicators(.hidden)
-                .scrollEdgeEffectHidden(true, for: .top)
+                .scrollEdgeEffectStyle(.soft, for: .top)
                 .ignoresSafeArea(edges: .top)
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -53,11 +55,9 @@ struct HomeView: View {
     private func load() async {
         guard !loaded else { return }
         async let recent = client.fetchRecentlyAdded(limit: 14)
-        async let played = client.fetchRecentlyPlayed(limit: 16)
         async let feat = client.fetchFeatured(limit: 8)
         async let arts = client.fetchArtists(limit: 30)
         recentlyAdded = (try? await recent) ?? recentlyAdded
-        recentlyPlayed = (try? await played) ?? recentlyPlayed
         featured = (try? await feat) ?? featured
         artists = (try? await arts) ?? artists
         loaded = true
@@ -98,18 +98,18 @@ struct FeaturedCard: View {
     var body: some View {
         let art = client.artworkURL(for: album, size: 400)
         HStack(spacing: 16) {
-            LibraryImage(url: art, maxPixel: 400) { Color.white.opacity(0.12) }
+            LibraryImage(url: art, maxPixel: 400) { ArtworkPlaceholder() }
                 .frame(width: 116, height: 116)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+                .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(album.name)
-                    .font(.headline).foregroundStyle(.white).lineLimit(2)
+                    .font(.headline).foregroundStyle(.primary).lineLimit(2)
                 Text(album.albumArtist ?? album.primaryArtist)
-                    .font(.subheadline).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 Text(album.overview ?? "")
-                    .font(.caption).foregroundStyle(.white.opacity(0.6)).lineLimit(2)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -117,18 +117,18 @@ struct FeaturedCard: View {
         .padding(16)
         .frame(height: 148)
         .frame(maxWidth: .infinity)
+        // Dynamic artwork gradient toned toward the system background, so the card adapts to light/dark.
         .background {
-            ZStack {
-                LibraryImage(url: art, maxPixel: 400) { Color(white: 0.15) }
-                    .blur(radius: 28)
-                LinearGradient(colors: [.black.opacity(0.45), .black.opacity(0.7)],
-                               startPoint: .top, endPoint: .bottom)
-            }
+            ArtworkGradient(url: art, blur: 24)
+                .overlay(Color(.systemBackground).opacity(0.42))
+                .overlay(LinearGradient(colors: [Color(.systemBackground).opacity(0.15),
+                                                 Color(.systemBackground).opacity(0.5)],
+                                        startPoint: .top, endPoint: .bottom))
         }
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(.white.opacity(0.1), lineWidth: 0.5)
+                .stroke(.primary.opacity(0.08), lineWidth: 0.5)
         )
     }
 }
@@ -141,9 +141,15 @@ struct ArtistsShelf: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Artists")
-                .font(.largeTitle).fontWeight(.bold)
-                .padding(.horizontal, DS.hPad)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Artists")
+                    .font(.largeTitle).fontWeight(.bold)
+                Spacer()
+                NavigationLink { AllArtistsView() } label: {
+                    Text("See All").font(.subheadline).fontWeight(.medium).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, DS.hPad)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
@@ -177,40 +183,39 @@ struct ArtistsShelf: View {
     }
 }
 
+// MARK: - All artists (pushed from the "See All" button)
+
+struct AllArtistsView: View {
+    @Environment(JellyfinClient.self) private var client
+    @State private var artists: [MediaItem] = []
+    @State private var loaded = false
+
+    var body: some View {
+        List {
+            ForEach(artists) { artist in
+                LibraryLink(route: .artist(artist)) { ArtistRow(artist: artist) }
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle("Artists")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            guard !loaded else { return }
+            artists = (try? await client.fetchArtists(limit: 200)) ?? []
+            loaded = true
+        }
+    }
+}
+
 // MARK: - Recently played shelf (horizontal track cards — tap to play)
 
 struct RecentlyPlayedShelf: View {
-    let tracks: [MediaItem]
+    /// Manual plays only (the user explicitly chose these) — not queue / Autoplay / auto-advance.
+    let plays: [ManualPlay]
     @Environment(JellyfinClient.self) private var client
     private let cardSize: CGFloat = 132
-
-    /// One recently-played card: a whole-album play collapses a run of same-album tracks into a single
-    /// album card; a one-off track stays a song card. `track` is the representative track (also used
-    /// for artwork, which resolves via its album).
-    private struct Entry: Identifiable {
-        let track: MediaItem
-        let isAlbum: Bool
-        var id: String { (isAlbum ? "a-" : "s-") + track.id }
-    }
-
-    /// Collapse consecutive same-album tracks (an album play) into one album entry; singles stay songs.
-    private var entries: [Entry] {
-        var out: [Entry] = []
-        var i = 0
-        while i < tracks.count {
-            let t = tracks[i]
-            if let aid = t.albumId {
-                var j = i + 1
-                while j < tracks.count, tracks[j].albumId == aid { j += 1 }
-                out.append(Entry(track: t, isAlbum: j - i >= 2))
-                i = j
-            } else {
-                out.append(Entry(track: t, isAlbum: false))
-                i += 1
-            }
-        }
-        return out
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -220,13 +225,13 @@ struct RecentlyPlayedShelf: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
-                    ForEach(entries) { e in
-                        let album = albumItem(for: e.track)
+                    ForEach(plays) { play in
+                        let album = albumItem(for: play.track)
                         // Album → album detail; song → album detail with the song highlighted.
-                        LibraryLink(route: e.isAlbum ? .album(album) : .albumSong(album, e.track.id)) {
-                            card(track: e.track,
-                                 title: e.isAlbum ? (e.track.album ?? e.track.name) : e.track.name,
-                                 subtitle: e.track.primaryArtist)
+                        LibraryLink(route: play.isAlbum ? .album(album) : .albumSong(album, play.track.id)) {
+                            card(track: play.track,
+                                 title: play.isAlbum ? (play.track.album ?? play.track.name) : play.track.name,
+                                 subtitle: play.track.primaryArtist)
                         }
                     }
                 }
@@ -238,8 +243,7 @@ struct RecentlyPlayedShelf: View {
     private func card(track: MediaItem, title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             LibraryImage(url: client.artworkURL(for: track, size: 400), maxPixel: 400) {
-                Color(.systemGray6)
-                    .overlay { Image(systemName: "music.note").foregroundStyle(Color(.systemGray4)) }
+                ArtworkPlaceholder()
             }
             .frame(width: cardSize, height: cardSize)
             .clipShape(RoundedRectangle(cornerRadius: DS.cornerCard, style: .continuous))

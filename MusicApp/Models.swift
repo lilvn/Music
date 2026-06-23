@@ -129,6 +129,15 @@ enum LibraryRoute: Hashable, Identifiable {
 
 // MARK: - Playback
 
+/// One entry in the manual "Recently Played" history — a release the user explicitly chose to play
+/// (album vs single song). Distinct from the server's play history, which also counts auto-advance /
+/// Autoplay / queue jumps.
+struct ManualPlay: Codable, Identifiable {
+    let track: MediaItem
+    let isAlbum: Bool
+    var id: String { (isAlbum ? "a-" : "s-") + (track.albumId ?? track.id) }
+}
+
 struct PlaybackQueue {
     var items: [MediaItem] = []
     /// Canonical (unshuffled) order, used to restore order when shuffle is turned off.

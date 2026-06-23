@@ -38,7 +38,9 @@ struct LyricsView: View {
                 }
             }
         }
-        .presentationBackground(.thinMaterial)
+        .presentationBackground {
+            CrossfadeBackground(url: client.artworkURL(for: player.currentItem ?? .placeholder, size: 400))
+        }
         .task {
             if let id = player.currentItem?.id {
                 lines = (try? await client.fetchLyrics(itemId: id)) ?? []

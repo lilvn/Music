@@ -42,8 +42,33 @@ struct NowPlayingView: View {
     @State private var showQueue = false
     @State private var showLyrics = false
 
+    /// Close the player, then ask RootTabView to navigate (so it doesn't open over the player).
+    private func navigate(_ route: LibraryRoute) {
+        player.pendingRoute = route
+        dismiss()
+    }
+
     private var seed: Int {
         (player.currentItem?.id ?? "x").unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
+    }
+
+    /// A minimal album item for navigation; AlbumDetailView fetches full metadata by id.
+    private var albumItem: MediaItem {
+        let t = player.currentItem ?? .placeholder
+        return MediaItem(id: t.albumId ?? t.id, name: t.album ?? t.name, type: "MusicAlbum",
+                         sortName: nil, albumArtist: t.albumArtist, albumArtists: nil, album: nil, albumId: nil,
+                         artistItems: t.artistItems, indexNumber: nil, parentIndexNumber: nil, runTimeTicks: nil,
+                         productionYear: nil, imageTags: nil, albumPrimaryImageTag: nil, childCount: nil,
+                         overview: nil, playlistItemId: nil)
+    }
+
+    private var artistRoute: LibraryRoute? {
+        guard let a = player.currentItem?.artistItems?.first else { return nil }
+        return .artist(MediaItem(id: a.id, name: a.name, type: "MusicArtist",
+                                 sortName: nil, albumArtist: nil, albumArtists: nil, album: nil, albumId: nil,
+                                 artistItems: nil, indexNumber: nil, parentIndexNumber: nil, runTimeTicks: nil,
+                                 productionYear: nil, imageTags: nil, albumPrimaryImageTag: nil, childCount: nil,
+                                 overview: nil, playlistItemId: nil))
     }
 
     var body: some View {
@@ -76,7 +101,11 @@ struct NowPlayingView: View {
         .padding(.top, 10)
         .padding(.bottom, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background { Color(.systemBackground).ignoresSafeArea() }
+        // Cross-fade the art background between tracks instead of snapping.
+        .background {
+            CrossfadeBackground(url: client.artworkURL(for: player.currentItem ?? .placeholder, size: 400))
+        }
+        .onAppear { player.refreshOutputRoute() }
         .sheet(isPresented: $showQueue) {
             UpNextView()
                 .presentationDetents([.large])
@@ -102,20 +131,21 @@ struct NowPlayingView: View {
     }
 
     private var albumArt: some View {
-        LibraryImage(url: client.artworkURL(for: player.currentItem ?? .placeholder, size: 1000), maxPixel: 1000) {
-            Color(.secondarySystemBackground)
-                .overlay {
-                    Image(systemName: "music.note")
-                        .font(.system(size: 64, weight: .ultraLight))
-                        .foregroundStyle(.tertiary)
-                }
+        // Corner radius scales with the (full-width) artwork, so the large now-playing art reads as
+        // round as the smaller artwork elsewhere instead of looking nearly square.
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height)
+            LibraryImage(url: client.artworkURL(for: player.currentItem ?? .placeholder, size: 1000), maxPixel: 1000) {
+                ArtworkPlaceholder()
+            }
+            .frame(width: side, height: side)
+            .clipShape(RoundedRectangle(cornerRadius: side * 0.1, style: .continuous))
+            .shadow(color: .black.opacity(0.22), radius: 24, y: 14)
+            .scaleEffect(player.isPlaying ? 1.0 : 0.9)
+            .animation(.spring(response: 0.55, dampingFraction: 0.72), value: player.isPlaying)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .aspectRatio(1, contentMode: .fit)
-        .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: DS.cornerArtwork, style: .continuous))
-        .shadow(color: .black.opacity(0.22), radius: 24, y: 14)
-        .scaleEffect(player.isPlaying ? 1.0 : 0.9)
-        .animation(.spring(response: 0.55, dampingFraction: 0.72), value: player.isPlaying)
         .layoutPriority(1)
     }
 
@@ -131,6 +161,14 @@ struct NowPlayingView: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        // 3D-touch (long-press) the title/artist for View Album / View Artist — not a plain tap.
+        .contextMenu {
+            Button { navigate(.album(albumItem)) } label: { Label("Go to Album", systemImage: "square.stack") }
+            if let artistRoute {
+                Button { navigate(artistRoute) } label: { Label("Go to Artist", systemImage: "music.mic") }
+            }
+        }
     }
 
     private var mainControls: some View {
@@ -158,8 +196,8 @@ struct NowPlayingView: View {
                 Image(systemName: "forward.fill").font(.system(size: 28))
             }
             .foregroundStyle(.primary)
-            .disabled(!player.queue.hasNext)
-            .opacity(player.queue.hasNext ? 1 : 0.4)
+            .disabled(!player.canGoNext)
+            .opacity(player.canGoNext ? 1 : 0.4)
         }
         .frame(maxWidth: .infinity)
     }
@@ -176,9 +214,9 @@ struct NowPlayingView: View {
     /// Round Up Next (left) and Lyrics (right) flanking a wide AirPlay pill.
     private var secondaryRow: some View {
         HStack(spacing: 14) {
-            roundSecondary(icon: "list.bullet") { showQueue = true }
-            airPlayPill
             roundSecondary(icon: "quote.bubble") { showLyrics = true }
+            airPlayPill
+            roundSecondary(icon: "list.bullet") { showQueue = true }
         }
     }
 
@@ -188,7 +226,7 @@ struct NowPlayingView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.primary)
                 .frame(width: 54, height: 54)
-                .background(Color(.secondarySystemBackground), in: .circle)
+                .glassEffect(.regular.interactive(), in: .circle)
         }
         .buttonStyle(ScaleButtonStyle())
     }
@@ -206,7 +244,7 @@ struct NowPlayingView: View {
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity)
             .frame(height: 54)
-            .background(Color(.secondarySystemBackground), in: .capsule)
+            .glassEffect(.regular.interactive(), in: .capsule)
 
             AirPlayButton(tint: .clear)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -13,8 +13,29 @@ struct AlbumDetailView: View {
     /// still gets its name / year / artwork).
     @State private var albumDetail: MediaItem?
 
+    @Environment(\.libraryPush) private var push
+    @Namespace private var trackHighlightNS
+
     private var info: MediaItem { albumDetail ?? album }
     private var totalSeconds: Double { tracks.reduce(0) { $0 + ($1.durationSeconds ?? 0) } }
+
+    /// A minimal artist item for navigation (ArtistDetailView fetches full metadata by id).
+    private var artistItem: MediaItem? {
+        guard let a = info.artistItems?.first ?? info.albumArtists?.first else { return nil }
+        return MediaItem(id: a.id, name: a.name, type: "MusicArtist", sortName: nil, albumArtist: nil,
+                         albumArtists: nil, album: nil, albumId: nil, artistItems: nil, indexNumber: nil,
+                         parentIndexNumber: nil, runTimeTicks: nil, productionYear: nil, imageTags: nil,
+                         albumPrimaryImageTag: nil, childCount: nil, overview: nil, playlistItemId: nil)
+    }
+
+    private var lengthSummary: String {
+        let totalMin = Int(totalSeconds / 60)
+        if totalMin >= 60 {
+            let h = totalMin / 60, m = totalMin % 60
+            return m > 0 ? "\(h) hr \(m) min" : "\(h) hr"
+        }
+        return "\(max(1, totalMin)) min"
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -43,11 +64,13 @@ struct AlbumDetailView: View {
                                     onTap: { player.play(items: tracks, from: idx) },
                                     onPlayNext: { player.playNext(track) },
                                     onPlayLast: { player.playLast(track) },
-                                    onAddToPlaylist: { addRequest = PlaylistAddRequest(itemIds: [track.id]) })
+                                    onAddToPlaylist: { addRequest = PlaylistAddRequest(itemIds: [track.id]) },
+                                    highlightNamespace: trackHighlightNS)
                                 .id(track.id)
                                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                .listRowSeparator(.hidden)
                                 .listRowBackground(track.id == highlightSongId
-                                                   ? Color.primary.opacity(0.08) : Color.clear)
+                                                   ? Color.primary.opacity(0.10) : Color.clear)
                                 .trackSwipeActions(onPlayNext: { player.playNext(track) },
                                                    onPlayLast: { player.playLast(track) })
                         }
@@ -60,10 +83,20 @@ struct AlbumDetailView: View {
                         }
                     }
                 }
+
+                Section {
+                    albumFooter
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background { ArtworkBackground(url: client.artworkURL(for: info, size: 400)) }
         .scrollIndicators(.hidden)
+        .animation(.spring(response: 0.4, dampingFraction: 0.82), value: player.currentItem?.id)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $addRequest) { PlaylistPickerSheet(request: $0) }
         .task {
@@ -78,12 +111,6 @@ struct AlbumDetailView: View {
             }
         }
         }   // ScrollViewReader
-    }
-
-    private func formatLength(_ s: Double) -> String {
-        let t = Int(s.rounded())
-        let h = t / 3600, m = (t % 3600) / 60, sec = t % 60
-        return h > 0 ? "\(h)h \(m)m \(sec)s" : "\(m)m \(sec)s"
     }
 
     private var header: some View {
@@ -109,12 +136,7 @@ struct AlbumDetailView: View {
 
     private var artwork: some View {
         LibraryImage(url: client.artworkURL(for: info, size: 600), maxPixel: 600) {
-            Color(.secondarySystemBackground)
-                .overlay {
-                    Image(systemName: "music.note")
-                        .font(.system(size: 64, weight: .ultraLight))
-                        .foregroundStyle(.tertiary)
-                }
+            ArtworkPlaceholder()
         }
         .frame(width: 240, height: 240)
         .clipShape(RoundedRectangle(cornerRadius: DS.cornerArtwork, style: .continuous))
@@ -123,28 +145,41 @@ struct AlbumDetailView: View {
     }
 
     private var metadata: some View {
-        let count = tracks.isEmpty ? (info.childCount ?? 0) : tracks.count
-        return VStack(spacing: 6) {
+        VStack(spacing: 6) {
             Text(info.name)
                 .font(.title2).fontWeight(.bold)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, DS.hPad)
-            Text(info.albumArtist ?? info.primaryArtist)
-                .font(.callout).foregroundStyle(.secondary)
-            HStack(spacing: 6) {
-                if let year = info.productionYear { Text(String(year)) }
-                if info.productionYear != nil, count > 0 { Text("·").foregroundStyle(.quaternary) }
-                if count > 0 { Text("\(count) song\(count == 1 ? "" : "s")") }
-            }
-            .font(.footnote)
-            .foregroundStyle(.tertiary)
-            if totalSeconds > 0 {
-                Text(formatLength(totalSeconds))
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
-                    .monospacedDigit()
+            // Tappable artist → artist profile.
+            if let artistItem {
+                Button { push(.artist(artistItem)) } label: {
+                    Text(artistItem.name)
+                        .font(.callout).fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text(info.albumArtist ?? info.primaryArtist)
+                    .font(.callout).foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Apple-Music-style footer beneath the tracklist: song count + total time, then the year.
+    private var albumFooter: some View {
+        let count = tracks.count
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("\(count) song\(count == 1 ? "" : "s")" + (totalSeconds > 0 ? ", \(lengthSummary)" : ""))
+                .font(.footnote).foregroundStyle(.secondary)
+            if let year = info.productionYear {
+                Text(verbatim: String(year))
+                    .font(.footnote).foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, DS.hPad)
+        .padding(.top, 18)
+        .padding(.bottom, 28)
     }
 
     private var playButton: some View {

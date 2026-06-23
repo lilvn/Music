@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "heart-speaker.png",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
