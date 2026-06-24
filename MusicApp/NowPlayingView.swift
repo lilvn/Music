@@ -24,8 +24,9 @@ struct AirPlayButton: UIViewRepresentable {
 /// Only functional on a real device; the simulator has no volume hardware.
 struct VolumeSlider: UIViewRepresentable {
     func makeUIView(context: Context) -> MPVolumeView {
+        // Modern MPVolumeView is just the slider (the route button is gone — AirPlay lives in the pill),
+        // so there's nothing to hide; the deprecated `showsRouteButton` is no longer needed.
         let v = MPVolumeView()
-        v.showsRouteButton = false
         v.tintColor = .label
         return v
     }
@@ -42,10 +43,10 @@ struct NowPlayingView: View {
     @State private var showQueue = false
     @State private var showLyrics = false
 
-    /// Close the player, then ask RootTabView to navigate (so it doesn't open over the player).
+    /// Ask RootTabView to push the route. It pushes BEHIND the player and then closes it, so the detail
+    /// is already on screen when the player dismisses — no flash of the Home root in between.
     private func navigate(_ route: LibraryRoute) {
         player.pendingRoute = route
-        dismiss()
     }
 
     private var seed: Int {
@@ -63,7 +64,11 @@ struct NowPlayingView: View {
     }
 
     private var artistRoute: LibraryRoute? {
-        guard let a = player.currentItem?.artistItems?.first else { return nil }
+        // Prefer the ALBUM artist (whose page actually contains this song's album) over the track's
+        // performers in `artistItems` — those can be featured artists that open the wrong page where
+        // the song isn't listed.
+        guard let a = player.currentItem?.albumArtists?.first ?? player.currentItem?.artistItems?.first
+        else { return nil }
         return .artist(MediaItem(id: a.id, name: a.name, type: "MusicArtist",
                                  sortName: nil, albumArtist: nil, albumArtists: nil, album: nil, albumId: nil,
                                  artistItems: nil, indexNumber: nil, parentIndexNumber: nil, runTimeTicks: nil,
@@ -139,8 +144,8 @@ struct NowPlayingView: View {
                 ArtworkPlaceholder()
             }
             .frame(width: side, height: side)
-            .clipShape(RoundedRectangle(cornerRadius: side * 0.1, style: .continuous))
-            .shadow(color: .black.opacity(0.22), radius: 24, y: 14)
+            .clipShape(RoundedRectangle(cornerRadius: side * 0.05, style: .continuous))
+            .artworkShadow()
             .scaleEffect(player.isPlaying ? 1.0 : 0.9)
             .animation(.spring(response: 0.55, dampingFraction: 0.72), value: player.isPlaying)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -150,25 +155,57 @@ struct NowPlayingView: View {
     }
 
     private var trackInfo: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(player.currentItem?.name ?? "Not Playing")
-                .font(.title2).fontWeight(.bold)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-            Text(player.currentItem?.primaryArtist ?? "")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        // 3D-touch (long-press) the title/artist for View Album / View Artist — not a plain tap.
-        .contextMenu {
-            Button { navigate(.album(albumItem)) } label: { Label("Go to Album", systemImage: "square.stack") }
-            if let artistRoute {
-                Button { navigate(artistRoute) } label: { Label("Go to Artist", systemImage: "music.mic") }
+        // Title/artist on the left, like button on the right edge.
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(player.currentItem?.name ?? "Not Playing")
+                    .font(.title2).fontWeight(.bold)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(player.currentItem?.primaryArtist ?? "")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            // 3D-touch (long-press) the title/artist for Go to Album / Artist. A custom preview keeps the
+            // lifted platter clean (the default snapshot of the full-width, truncated title clipped oddly).
+            .contextMenu {
+                Button { navigate(.album(albumItem)) } label: { Label("Go to Album", systemImage: "square.stack") }
+                if let artistRoute {
+                    Button { navigate(artistRoute) } label: { Label("Go to Artist", systemImage: "music.mic") }
+                }
+            } preview: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(player.currentItem?.name ?? "").font(.headline)
+                    Text(player.currentItem?.primaryArtist ?? "").font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(20)
+            }
+
+            addButton
         }
+    }
+
+    /// Apple-Music-style add button — a "+" to like the song, swapping to a checkmark once it's added.
+    @ViewBuilder
+    private var addButton: some View {
+        let liked = player.currentItem.map { client.favoriteIds.contains($0.id) } ?? false
+        Button {
+            guard let id = player.currentItem?.id else { return }
+            Task { await client.setFavorite(id, !liked) }
+        } label: {
+            Image(systemName: liked ? "checkmark" : "plus")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(player.currentItem == nil)
+        .sensoryFeedback(.impact(weight: .light), trigger: liked)
     }
 
     private var mainControls: some View {

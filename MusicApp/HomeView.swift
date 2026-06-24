@@ -8,6 +8,7 @@ struct HomeView: View {
 
     @State private var recentlyAdded: [MediaItem] = []
     @State private var featured: [MediaItem] = []
+    @State private var mostPlayed: [MediaItem] = []
     @State private var artists: [MediaItem] = []
     @State private var loaded = false
     @State private var showSettings = false
@@ -26,6 +27,9 @@ struct HomeView: View {
                         }
                         if !player.recentManualPlays.isEmpty {
                             RecentlyPlayedShelf(plays: player.recentManualPlays)
+                        }
+                        if !mostPlayed.isEmpty {
+                            MostPlayedShelf(tracks: mostPlayed)
                         }
                         if !artists.isEmpty {
                             ArtistsShelf(artists: artists)
@@ -56,11 +60,21 @@ struct HomeView: View {
         guard !loaded else { return }
         async let recent = client.fetchRecentlyAdded(limit: 14)
         async let feat = client.fetchFeatured(limit: 8)
+        async let most = client.fetchMostPlayed(limit: 16)
         async let arts = client.fetchArtists(limit: 30)
         recentlyAdded = (try? await recent) ?? recentlyAdded
         featured = (try? await feat) ?? featured
+        mostPlayed = (try? await most) ?? mostPlayed
         artists = (try? await arts) ?? artists
         loaded = true
+
+        // Warm each shelf's artwork at the size it actually renders, so nothing pops in as you scroll.
+        let store = ImageStore.shared
+        store.prefetch(recentlyAdded.map { client.artworkURL(for: $0, size: 400) }, maxPixel: 400)
+        store.prefetch(featured.map { client.artworkURL(for: $0, size: 600) }, maxPixel: 600)
+        store.prefetch(mostPlayed.map { client.artworkURL(for: $0, size: 400) }, maxPixel: 400)
+        store.prefetch(artists.map { client.artworkURL(for: $0, size: 200) }, maxPixel: 280)
+        store.prefetch(player.recentManualPlays.map { client.artworkURL(for: $0.track, size: 400) }, maxPixel: 400)
     }
 }
 
@@ -100,8 +114,8 @@ struct FeaturedCard: View {
         HStack(spacing: 16) {
             LibraryImage(url: art, maxPixel: 400) { ArtworkPlaceholder() }
                 .frame(width: 116, height: 116)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+                .clipShape(RoundedRectangle(cornerRadius: DS.cornerCard, style: .continuous))
+                .artworkShadow()
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(album.name)
@@ -117,17 +131,17 @@ struct FeaturedCard: View {
         .padding(16)
         .frame(height: 148)
         .frame(maxWidth: .infinity)
-        // Dynamic artwork gradient toned toward the system background, so the card adapts to light/dark.
+        // Static artwork gradient (no per-card animation — keeps the home feed smooth while scrolling).
         .background {
-            ArtworkGradient(url: art, blur: 24)
+            ArtworkGradient(url: art, blur: 24, animated: false)
                 .overlay(Color(.systemBackground).opacity(0.42))
                 .overlay(LinearGradient(colors: [Color(.systemBackground).opacity(0.15),
                                                  Color(.systemBackground).opacity(0.5)],
                                         startPoint: .top, endPoint: .bottom))
         }
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(.primary.opacity(0.08), lineWidth: 0.5)
         )
     }
@@ -237,6 +251,7 @@ struct RecentlyPlayedShelf: View {
                 }
                 .padding(.horizontal, DS.hPad)
             }
+            .scrollClipDisabled()   // don't clip the cards' drop shadow at the top/bottom edges
         }
     }
 
@@ -247,11 +262,68 @@ struct RecentlyPlayedShelf: View {
             }
             .frame(width: cardSize, height: cardSize)
             .clipShape(RoundedRectangle(cornerRadius: DS.cornerCard, style: .continuous))
-            .shadow(color: .black.opacity(DS.shadowOpacity), radius: DS.shadowRadius, y: DS.shadowY)
+            .artworkShadow()
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.footnote).fontWeight(.semibold).foregroundStyle(.primary).lineLimit(1)
                 Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .frame(width: cardSize, alignment: .leading)
+        }
+    }
+
+    /// A minimal album item for navigation; AlbumDetailView fetches full metadata by id.
+    private func albumItem(for t: MediaItem) -> MediaItem {
+        MediaItem(id: t.albumId ?? t.id, name: t.album ?? t.name, type: "MusicAlbum",
+                  sortName: nil, albumArtist: t.albumArtist, albumArtists: nil,
+                  album: nil, albumId: nil, artistItems: t.artistItems,
+                  indexNumber: nil, parentIndexNumber: nil, runTimeTicks: nil,
+                  productionYear: nil, imageTags: nil, albumPrimaryImageTag: nil,
+                  childCount: nil, overview: nil, playlistItemId: nil)
+    }
+}
+
+// MARK: - Most Played shelf (top songs by play count)
+
+struct MostPlayedShelf: View {
+    /// The user's most-played songs, already ordered most-played first.
+    let tracks: [MediaItem]
+    @Environment(JellyfinClient.self) private var client
+    private let cardSize: CGFloat = 132
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Most Played")
+                .font(.largeTitle).fontWeight(.bold)
+                .padding(.horizontal, DS.hPad)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 14) {
+                    ForEach(tracks) { track in
+                        // Tap opens the album detail with this song highlighted (does NOT start playback).
+                        LibraryLink(route: .albumSong(albumItem(for: track), track.id)) {
+                            card(track: track)
+                        }
+                    }
+                }
+                .padding(.horizontal, DS.hPad)
+            }
+            .scrollClipDisabled()   // don't clip the cards' drop shadow at the top/bottom edges
+        }
+    }
+
+    private func card(track: MediaItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            LibraryImage(url: client.artworkURL(for: track, size: 400), maxPixel: 400) {
+                ArtworkPlaceholder()
+            }
+            .frame(width: cardSize, height: cardSize)
+            .clipShape(RoundedRectangle(cornerRadius: DS.cornerCard, style: .continuous))
+            .artworkShadow()
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(track.name).font(.footnote).fontWeight(.semibold).foregroundStyle(.primary).lineLimit(1)
+                Text(track.primaryArtist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             .frame(width: cardSize, alignment: .leading)
         }

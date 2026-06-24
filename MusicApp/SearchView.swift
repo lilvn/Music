@@ -1,92 +1,38 @@
 import SwiftUI
-import UIKit
 
-/// A wrapped `UISearchBar` so we control the keyboard: NO predictive/QuickType suggestions bar, and
-/// the return key is a "Done" key that closes the keyboard (search runs live as you type, so the
-/// return key never needs to "search").
-struct SearchField: UIViewRepresentable {
-    @Binding var text: String
-    var placeholder: String
-
-    func makeUIView(context: Context) -> UISearchBar {
-        let bar = UISearchBar()
-        bar.placeholder = placeholder
-        bar.searchBarStyle = .minimal
-        bar.autocapitalizationType = .none
-        bar.autocorrectionType = .no
-        bar.spellCheckingType = .no
-        bar.returnKeyType = .done
-        bar.enablesReturnKeyAutomatically = false
-        let field = bar.searchTextField
-        field.autocorrectionType = .no
-        field.spellCheckingType = .no
-        field.inlinePredictionType = .no      // no inline QuickType predictions
-        field.smartDashesType = .no
-        field.smartQuotesType = .no
-        bar.delegate = context.coordinator
-        return bar
-    }
-
-    func updateUIView(_ bar: UISearchBar, context: Context) {
-        if bar.text != text { bar.text = text }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject, UISearchBarDelegate {
-        var parent: SearchField
-        init(_ parent: SearchField) { self.parent = parent }
-
-        func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
-            parent.text = searchText
-        }
-        // The "Done" return key just closes the keyboard.
-        func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
-            searchBar.resignFirstResponder()
-        }
-    }
-}
-
-/// The search tab's root. A custom search field (top), live results below; result taps push with the
-/// same zoom card-expand as the rest of the app.
+/// The search tab's root. Uses the native iOS 26 search experience: the tab is declared with
+/// `role: .search` (RootTabView), so `.searchable` here renders as the bottom search field that morphs
+/// out of the tab bar, Apple-Music style. Results stream in live as you type.
 struct SearchView: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
 
     @State private var query = ""
     @State private var results: [MediaItem] = []
+    @State private var resultCache: [String: [MediaItem]] = [:]   // query → results, so repeats hit no network
     @State private var isSearching = false
     @State private var addRequest: PlaylistAddRequest?
+    @State private var path = NavigationPath()
     @Namespace private var ns
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
-    private var albums:  [MediaItem] { results.filter { $0.type == "MusicAlbum" } }
-    private var artists: [MediaItem] { results.filter { $0.type == "MusicArtist" } }
-    private var songs:   [MediaItem] { results.filter { $0.type == "Audio" } }
+    private var albums:    [MediaItem] { results.filter { $0.type == "MusicAlbum" } }
+    private var artists:   [MediaItem] { results.filter { $0.type == "MusicArtist" } }
+    private var songs:     [MediaItem] { results.filter { $0.type == "Audio" } }
+    private var playlists: [MediaItem] { results.filter { $0.type == "Playlist" } }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                SearchField(text: $query, placeholder: "Artists, Albums, Songs")
-                    .padding(.horizontal, 10)
-                    .padding(.top, 4)
-                    .padding(.bottom, 2)
-
-                ScrollView {
-                    if trimmed.isEmpty {
-                        emptyPrompt
-                    } else if isSearching && results.isEmpty {
-                        HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 60)
-                    } else if results.isEmpty {
-                        noResults
-                    } else {
-                        searchResults
-                    }
+        NavigationStack(path: $path) {
+            Group {
+                if trimmed.isEmpty {
+                    centeredScroll { emptyPrompt }
+                } else if isSearching && results.isEmpty {
+                    centeredScroll { HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 60) }
+                } else if results.isEmpty {
+                    centeredScroll { noResults }
+                } else {
+                    resultsList
                 }
-                .scrollIndicators(.hidden)
-                .scrollDismissesKeyboard(.immediately)
-                // Tap anywhere in the results area (not the field) to close the keyboard.
-                .simultaneousGesture(TapGesture().onEnded { dismissKeyboard() })
             }
             .navigationTitle("Search")
             .navigationBarTitleDisplayMode(.inline)
@@ -94,17 +40,38 @@ struct SearchView: View {
                 destinationView(for: route)
                     .navigationTransition(.zoom(sourceID: route.id, in: ns))
             }
+            .searchable(text: $query, prompt: "Artists, Albums, Songs")
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
         }
         .environment(\.zoomNamespace, ns)
+        .environment(\.libraryPush) { path.append($0) }   // lets a song row's "Go to Artist" push here
         .sheet(item: $addRequest) { PlaylistPickerSheet(request: $0) }
         // Re-runs (and cancels the prior run) whenever the query changes — the sleep debounces.
         .task(id: query) {
-            guard !trimmed.isEmpty else { results = []; isSearching = false; return }
+            let anim = Animation.easeInOut(duration: 0.22)
+            guard !trimmed.isEmpty else { withAnimation(anim) { results = []; isSearching = false }; return }
+            if let cached = resultCache[trimmed] {          // repeat query → instant, no network competing with audio
+                withAnimation(anim) { results = cached; isSearching = false }; return
+            }
             isSearching = true
             try? await Task.sleep(for: .milliseconds(280))
             guard !Task.isCancelled else { return }
-            results = (try? await client.search(query: trimmed)) ?? []
-            isSearching = false
+            let found = (try? await client.search(query: trimmed)) ?? []
+            guard !Task.isCancelled else { return }
+            // When a search matches an artist, pull in that artist's albums + songs so they show too.
+            var merged = found
+            if let artist = found.first(where: { $0.type == "MusicArtist" }) {
+                async let al = client.fetchAlbums(artistId: artist.id)
+                async let so = client.fetchArtistSongs(artistId: artist.id)
+                let artistAlbums = (try? await al) ?? []
+                let artistSongs = Array(((try? await so) ?? []).prefix(40))
+                var seen = Set(merged.map(\.id))
+                for item in artistAlbums + artistSongs where seen.insert(item.id).inserted { merged.append(item) }
+            }
+            guard !Task.isCancelled else { return }
+            resultCache[trimmed] = merged
+            withAnimation(anim) { results = merged; isSearching = false }
         }
     }
 
@@ -140,20 +107,23 @@ struct SearchView: View {
 
     // MARK: - Results
 
-    private var searchResults: some View {
-        LazyVStack(alignment: .leading, spacing: 0) {
+    private var resultsList: some View {
+        List {
             if !artists.isEmpty {
-                sectionLabel("Artists", icon: "person.fill")
+                sectionLabel("Artists", icon: "person.fill").plainRow()
                 ForEach(artists) { artist in
-                    LibraryLink(route: .artist(artist)) {
+                    // A Button (not a List NavigationLink) so the row keeps its clean, chevron-free look.
+                    Button { path.append(LibraryRoute.artist(artist)) } label: {
                         ArtistRow(artist: artist, large: true)
                     }
-                    Divider().padding(.leading, DS.hPad + 66 + 14)
+                    .buttonStyle(ScaleButtonStyle())
+                    .matchedTransitionSource(id: LibraryRoute.artist(artist).id, in: ns)
+                    .plainRow()
                 }
             }
 
             if !albums.isEmpty {
-                sectionLabel("Albums", icon: "square.stack")
+                sectionLabel("Albums", icon: "square.stack").plainRow()
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: DS.gridSpacing) {
                         ForEach(albums) { album in
@@ -165,12 +135,27 @@ struct SearchView: View {
                     .padding(.horizontal, DS.hPad)
                     .padding(.bottom, 4)
                 }
-                .padding(.top, 4)
-                .padding(.bottom, 8)
+                .plainRow()
+            }
+
+            if !playlists.isEmpty {
+                sectionLabel("Playlists", icon: "music.note.list").plainRow()
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: DS.gridSpacing) {
+                        ForEach(playlists) { playlist in
+                            LibraryLink(route: .playlist(playlist)) {
+                                AlbumCard(album: playlist).frame(width: 170)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, DS.hPad)
+                    .padding(.bottom, 4)
+                }
+                .plainRow()
             }
 
             if !songs.isEmpty {
-                sectionLabel("Songs", icon: "music.note")
+                sectionLabel("Songs", icon: "music.note").plainRow()
                 ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                     SongRow(song: song, showAlbumArt: true,
                             onTap: { player.play(items: songs, from: index) },
@@ -178,18 +163,22 @@ struct SearchView: View {
                             onPlayLast: { player.playLast(song) },
                             onAddToPlaylist: { addRequest = PlaylistAddRequest(itemIds: [song.id]) },
                             large: true)
-                    if index < songs.count - 1 {
-                        Divider().padding(.leading, DS.hPad + 56 + 12)
-                    }
+                        .plainRow()
+                        // Swipe a result straight into the queue — same gestures as the tracklists.
+                        .trackSwipeActions(onPlayNext: { player.playNext(song) },
+                                           onPlayLast: { player.playLast(song) })
                 }
             }
         }
-        .padding(.top, 8)
-        .padding(.bottom, 24)
+        .listStyle(.plain)
+        .scrollIndicators(.hidden)
+        .scrollDismissesKeyboard(.immediately)
     }
 
-    private func dismissKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    private func centeredScroll<V: View>(@ViewBuilder _ content: () -> V) -> some View {
+        ScrollView { content() }
+            .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.immediately)
     }
 
     private func sectionLabel(_ title: String, icon: String) -> some View {
@@ -201,5 +190,15 @@ struct SearchView: View {
             .padding(.horizontal, DS.hPad)
             .padding(.top, 18)
             .padding(.bottom, 6)
+    }
+}
+
+private extension View {
+    /// Strip the List's chrome so a search result row keeps the old free-form, edge-to-edge look
+    /// (rows supply their own padding; section labels supply their own).
+    func plainRow() -> some View {
+        listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
     }
 }

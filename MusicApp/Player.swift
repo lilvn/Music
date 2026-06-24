@@ -35,6 +35,10 @@ final class Player {
     var isScrubbing = false
     var scrubProgress: Double = 0
 
+    /// Live audio-output level (0…1, smoothed) from the metering tap — drives the audio-reactive
+    /// playing-indicator bars.
+    var audioLevel: Double = 0
+
     /// Autoplay: when the queue runs out, keep playing a server-generated instant mix of similar songs.
     var autoplayEnabled = true
     /// Upcoming Autoplay songs (an instant mix) — shown under the Up Next list, played when the queue ends.
@@ -49,7 +53,21 @@ final class Player {
 
     var currentItem: MediaItem? { queue.currentItem }
     /// Forward is allowed if there's a next track OR Autoplay can take over at the end of the queue.
-    var canGoNext: Bool { queue.hasNext || (autoplayEnabled && !autoplayTracks.isEmpty) }
+    /// Forward is allowed if there's a next track OR Autoplay is on (it fetches a mix on demand when the
+    /// queue ends — so don't gate on `autoplayTracks` being non-empty, which flickers as it's consumed).
+    var canGoNext: Bool { queue.hasNext || autoplayEnabled }
+
+    /// The track immediately before the current one — drives the mini-bar swipe preview.
+    var previousItem: MediaItem? {
+        let i = queue.currentIndex - 1
+        return queue.items.indices.contains(i) ? queue.items[i] : nil
+    }
+    /// The track a forward skip would play (next in queue, else the first Autoplay suggestion).
+    var upcomingItem: MediaItem? {
+        let i = queue.currentIndex + 1
+        if queue.items.indices.contains(i) { return queue.items[i] }
+        return (autoplayEnabled && !autoplayTracks.isEmpty) ? autoplayTracks.first : nil
+    }
 
     @ObservationIgnored private let client: JellyfinClient
 
@@ -59,6 +77,9 @@ final class Player {
     @ObservationIgnored private var currentPlayerItem: AVPlayerItem?
     @ObservationIgnored private var lookaheadItem: AVPlayerItem?
     @ObservationIgnored private var lookaheadIndex: Int?
+    /// Track id of the pre-rolled next, so a queue edit that doesn't change the upcoming track can
+    /// leave the player (and its buffering) completely untouched.
+    @ObservationIgnored private var lookaheadTrackId: String?
 
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var statusObservation: NSKeyValueObservation?
@@ -79,7 +100,10 @@ final class Player {
     @ObservationIgnored private let sessionDefaultsKey = "lastPlaybackSession"
     @ObservationIgnored private var autoplaySeedId: String?
     @ObservationIgnored private let autoplayDefaultsKey = "autoplayEnabled"
-    @ObservationIgnored private let manualPlaysKey = "recentManualPlays"
+    /// Legacy single-user key, kept only to migrate an existing history into the per-user store.
+    @ObservationIgnored private let legacyManualPlaysKey = "recentManualPlays"
+    private func manualPlaysKey(for userId: String) -> String { "recentManualPlays.\(userId)" }
+    @ObservationIgnored private let audioMonitor = AudioLevelMonitor()
 #if os(iOS)
     @ObservationIgnored private let skipFeedback = UIImpactFeedbackGenerator(style: .medium)
 #endif
@@ -90,11 +114,9 @@ final class Player {
         setupRemoteControls()
         setupNotifications()
         updateOutputRoute()
+        audioMonitor.onLevel = { [weak self] in self?.audioLevel = $0 }
         autoplayEnabled = UserDefaults.standard.object(forKey: autoplayDefaultsKey) as? Bool ?? true
-        if let data = UserDefaults.standard.data(forKey: manualPlaysKey),
-           let plays = try? JSONDecoder().decode([ManualPlay].self, from: data) {
-            recentManualPlays = plays
-        }
+        loadRecentPlays(for: client.userId)
         restoreSession()   // show the last-played track in the mini bar (paused, ready to resume)
     }
 
@@ -122,6 +144,7 @@ final class Player {
             queue.isShuffled = false
         }
         rebuild(at: queue.currentIndex, autoplay: true)
+        autoplayTracks = []   // fresh context → drop the old mix so a new one is fetched below the toggle
         autoplaySeedId = nil
         Task { await refreshAutoplay() }
     }
@@ -129,6 +152,12 @@ final class Player {
     /// Jump to an existing item in the current queue (e.g. tapping in the Up Next list).
     func play(at index: Int) {
         guard queue.items.indices.contains(index) else { return }
+        // Tapping the already-current track must NOT tear down and restart playback — a mis-registered
+        // tap while dragging to reorder Up Next was doing exactly that. Just resume if paused.
+        if index == queue.currentIndex, player != nil {
+            if !isPlaying { togglePlayPause() }
+            return
+        }
         pendingSeekTime = nil
         skipHaptic()
         rebuild(at: index, autoplay: true)
@@ -192,19 +221,18 @@ final class Player {
         }
     }
 
-    /// Tapping a track in the Autoplay list jumps to it (the whole mix is appended to the queue).
+    /// Tapping a track in the Autoplay list jumps to it — that one track moves up into the queue
+    /// (above the toggle) and plays; the rest of the autoplay list stays below the toggle.
     func playAutoplayFrom(_ index: Int) {
         guard autoplayTracks.indices.contains(index) else { return }
         skipHaptic()
-        let mix = autoplayTracks
-        autoplayTracks = []
-        autoplaySeedId = nil
+        let track = autoplayTracks.remove(at: index)
         let startIndex = queue.items.count
-        queue.items.append(contentsOf: mix)
+        queue.items.append(track)
         queue.originalItems = queue.items
         pendingSeekTime = nil
-        rebuild(at: startIndex + index, autoplay: true)
-        Task { await refreshAutoplay() }
+        rebuild(at: startIndex, autoplay: true)
+        if autoplayTracks.isEmpty { Task { await refreshAutoplay() } }
     }
 
     func previousTrack() {
@@ -226,6 +254,14 @@ final class Player {
         }
     }
 
+    /// Unconditionally go to the previous track (no restart-if-late) — the mini-bar swipe previews the
+    /// previous track, so it must actually land there.
+    func goPrevious() {
+        guard queue.currentIndex > 0 else { previousTrack(); return }
+        skipHaptic()
+        rebuild(at: queue.currentIndex - 1, autoplay: intendedPlaying || isPlaying)
+    }
+
     func skipForward(by seconds: Double = 15) { seek(to: min(currentTime + seconds, duration)) }
     func skipBackward(by seconds: Double = 15) { seek(to: max(currentTime - seconds, 0)) }
 
@@ -238,14 +274,38 @@ final class Player {
 
     /// Record a release the user explicitly chose to play, for the home "Recently Played" shelf.
     private func recordManualPlay(track: MediaItem, isAlbum: Bool) {
+        let uid = client.userId
+        guard !uid.isEmpty else { return }   // no signed-in user → nothing to attribute it to
         let entry = ManualPlay(track: track, isAlbum: isAlbum)
         recentManualPlays.removeAll { $0.id == entry.id }
         recentManualPlays.insert(entry, at: 0)
         if recentManualPlays.count > 24 { recentManualPlays = Array(recentManualPlays.prefix(24)) }
         if let data = try? JSONEncoder().encode(recentManualPlays) {
-            UserDefaults.standard.set(data, forKey: manualPlaysKey)
+            UserDefaults.standard.set(data, forKey: manualPlaysKey(for: uid))
         }
     }
+
+    /// Load the "Recently Played" history for a specific Jellyfin user — each account keeps its own.
+    /// Migrates a pre-existing global history into whichever user first loads it.
+    func loadRecentPlays(for userId: String) {
+        let d = UserDefaults.standard
+        guard !userId.isEmpty else { recentManualPlays = []; return }
+        let key = manualPlaysKey(for: userId)
+        if let data = d.data(forKey: key),
+           let plays = try? JSONDecoder().decode([ManualPlay].self, from: data) {
+            recentManualPlays = plays
+        } else if let legacy = d.data(forKey: legacyManualPlaysKey),
+                  let plays = try? JSONDecoder().decode([ManualPlay].self, from: legacy) {
+            recentManualPlays = plays                       // adopt the old shared history once…
+            d.set(legacy, forKey: key)                      // …re-home it under this user…
+            d.removeObject(forKey: legacyManualPlaysKey)    // …and don't let another user claim it too.
+        } else {
+            recentManualPlays = []
+        }
+    }
+
+    /// Re-point the history when the signed-in user changes (login / switch / sign-out).
+    func userDidChange(to userId: String) { loadRecentPlays(for: userId) }
 
     func toggleShuffle() { setShuffle(!queue.isShuffled) }
 
@@ -264,6 +324,8 @@ final class Player {
         currentTime = 0
         duration = 0
         pendingSeekTime = nil
+        audioMonitor.stop()
+        audioLevel = 0
         clearSession()
         clearNowPlayingInfo()
     }
@@ -333,15 +395,62 @@ final class Player {
         saveSession()
     }
 
+    /// Reorder the UNIFIED Up Next list — `queue.items` + a divider marker (the Autoplay toggle) +
+    /// `autoplayTracks`. After the drag we re-split at the marker, so a track dragged across the divider
+    /// moves between the queue and the suggestion list (and vice-versa).
+    func moveUpNext(from source: IndexSet, to destination: Int) {
+        let current = queue.currentItem   // capture before we rebuild the arrays
+        var combined: [MediaItem?] = queue.items.map { Optional($0) }
+        combined.append(nil)              // the Autoplay toggle row
+        combined.append(contentsOf: autoplayTracks.map { Optional($0) })
+
+        // Manual move (SwiftUI's Array.move isn't available in the model layer).
+        let sorted = source.sorted()
+        let moving = sorted.map { combined[$0] }
+        for i in sorted.reversed() { combined.remove(at: i) }
+        let insertAt = destination - sorted.filter { $0 < destination }.count
+        combined.insert(contentsOf: moving, at: min(max(0, insertAt), combined.count))
+
+        guard let split = combined.firstIndex(where: { $0 == nil }) else { return }
+        var newQueue = combined[..<split].compactMap { $0 }
+        var newAutoplay = combined[(split + 1)...].compactMap { $0 }
+
+        // Never let the currently-playing track slip below the divider into the suggestion list.
+        if let current, !newQueue.contains(where: { $0.id == current.id }) {
+            newAutoplay.removeAll { $0.id == current.id }
+            newQueue.append(current)
+        }
+
+        queue.items = newQueue
+        if !queue.isShuffled { queue.originalItems = newQueue }
+        autoplayTracks = newAutoplay
+        if let current, let idx = newQueue.firstIndex(where: { $0.id == current.id }) {
+            queue.currentIndex = idx
+        }
+        resyncLookahead()
+        saveSession()
+    }
+
+    /// Remove a track from the Autoplay list; refill the mix if it empties.
+    func removeAutoplay(at index: Int) {
+        guard autoplayTracks.indices.contains(index) else { return }
+        autoplayTracks.remove(at: index)
+        if autoplayTracks.isEmpty { Task { await refreshAutoplay() } }
+    }
+
     /// Warm the decoded-image cache for the current track and its neighbours, so skipping never
     /// flashes a placeholder anywhere (now playing, mini bar, lists).
     private func prefetchArtwork() {
+        // (url size, decode maxPixel) pairs matching how the views actually request each image — now
+        // that the cache is keyed by url+maxPixel — so skips are instant and flash-free: now-playing
+        // foreground (1000), now-playing/bg + CD gradient (400→160 / 160→160), mini-bar CD center
+        // label (160→240), Up Next rows (160→180).
+        let specs: [(Int, CGFloat)] = [(1000, 1000), (400, 160), (160, 160), (160, 240), (160, 180)]
         for i in [queue.currentIndex - 1, queue.currentIndex, queue.currentIndex + 1]
         where queue.items.indices.contains(i) {
             let item = queue.items[i]
-            for size in [1000, 400, 160] {
+            for (size, maxPixel) in specs {
                 guard let url = client.artworkURL(for: item, size: size) else { continue }
-                let maxPixel = CGFloat(size)
                 Task.detached(priority: .utility) { _ = await ImageStore.shared.load(url, maxPixel: maxPixel) }
             }
         }
@@ -477,6 +586,7 @@ final class Player {
         // The immediate item starts fast on a low buffer; lookahead items keep the default
         // (automatic) buffering so they're pre-rolled and ready for a gapless hand-off.
         if immediate { item.preferredForwardBufferDuration = 1 }
+        audioMonitor.installTap(on: item)   // meter this item's audio for the reactive waveform
         return item
     }
 
@@ -489,7 +599,9 @@ final class Player {
 
         queue.currentIndex = index
         currentTime = 0
-        duration = 0
+        // Seed from the track's metadata so the lock-screen length/scrubber appear immediately; the
+        // decoded duration refines it once the item is ready.
+        duration = queue.items[index].durationSeconds ?? 0
         isLoading = true
         isPlaying = false        // fresh player — let observeStatus start it once the item is ready
         intendedPlaying = autoplay
@@ -498,10 +610,12 @@ final class Player {
         currentPlayerItem = cur
         lookaheadItem = nil
         lookaheadIndex = nil
+        lookaheadTrackId = nil
         if let n = nextIndex(after: index), let next = makeItem(forIndex: n, immediate: false) {
             items.append(next)
             lookaheadItem = next
             lookaheadIndex = n
+            lookaheadTrackId = queue.items.indices.contains(n) ? queue.items[n].id : nil
         }
 
         let qp = AVQueuePlayer(items: items)
@@ -516,6 +630,7 @@ final class Player {
         updateNowPlayingInfo()
         saveSession()
         prefetchArtwork()
+        audioMonitor.start()
     }
 
     /// Make sure the next track is pre-rolled into the queue for a gapless hand-off.
@@ -523,19 +638,33 @@ final class Player {
         guard let player, lookaheadItem == nil else { return }
         guard let n = nextIndex(after: queue.currentIndex),
               let item = makeItem(forIndex: n, immediate: false),
-              let cur = currentPlayerItem,
+              let cur = player.currentItem,
               player.canInsert(item, after: cur) else { return }
         player.insert(item, after: cur)
         lookaheadItem = item
         lookaheadIndex = n
+        lookaheadTrackId = queue.items.indices.contains(n) ? queue.items[n].id : nil
     }
 
-    /// Drop the pre-rolled next and re-derive it (after a queue mutation / shuffle / repeat change).
+    /// Re-derive the pre-rolled next after a queue mutation / shuffle / repeat change. If the upcoming
+    /// track is UNCHANGED, the player is left completely untouched — so reordering tracks elsewhere
+    /// never re-buffers or glitches playback. Uses the player's ACTUAL current item so it can never
+    /// remove the item that's playing.
     private func resyncLookahead() {
-        guard let player, let cur = currentPlayerItem else { return }
+        guard let player, let cur = player.currentItem else { return }
+        let desiredNext = nextIndex(after: queue.currentIndex)
+        let desiredNextId = desiredNext.flatMap { queue.items.indices.contains($0) ? queue.items[$0].id : nil }
+
+        // Already pre-rolling the right next track → just keep the index in sync, touch nothing else.
+        if lookaheadTrackId == desiredNextId, let look = lookaheadItem, player.items().contains(look) {
+            lookaheadIndex = desiredNext
+            return
+        }
+
         for item in player.items() where item !== cur { player.remove(item) }
         lookaheadItem = nil
         lookaheadIndex = nil
+        lookaheadTrackId = nil
         ensureLookahead()
     }
 
@@ -596,8 +725,16 @@ final class Player {
                 switch it.status {
                 case .readyToPlay:
                     self.isLoading = false
+                    // The immediate item started on a deliberately SHALLOW 1s buffer for a fast start;
+                    // once it's playing, buffer DEEPLY (streamed audio feeds from this buffer, so a UI
+                    // hitch — the first keyboard load — or a brief network dip can't starve it). An
+                    // explicit large value is far more resilient than 0/automatic here.
+                    it.preferredForwardBufferDuration = 120
                     let d = it.duration.seconds
-                    if d.isFinite, !d.isNaN, d > 0 { self.duration = d }
+                    if d.isFinite, !d.isNaN, d > 0 {
+                        self.duration = d
+                        self.updateNowPlayingElapsed()   // push the real decoded duration to the lock screen
+                    }
                     if let t = self.pendingSeekTime {   // resume a restored session at its saved spot
                         self.pendingSeekTime = nil
                         self.seek(to: t)
@@ -641,9 +778,12 @@ final class Player {
         currentPlayerItem = item
         lookaheadItem = nil
         lookaheadIndex = nil
+        lookaheadTrackId = nil
         queue.currentIndex = index
         currentTime = 0
-        duration = readyDuration(item)
+        let decoded = readyDuration(item)
+        duration = decoded > 0 ? decoded
+            : (queue.items.indices.contains(index) ? (queue.items[index].durationSeconds ?? 0) : 0)
         reportStart()
         updateNowPlayingInfo()
         observeStatus(of: item)                // refresh duration once fully ready
@@ -679,16 +819,15 @@ final class Player {
         }
     }
 
-    /// Refresh the upcoming Autoplay tracks — an instant mix seeded by the last queued track, with
-    /// anything already queued filtered out. No-op if the seed hasn't changed.
+    /// Fill the upcoming Autoplay list (an instant mix seeded by the last queued track) ONLY when it's
+    /// empty — so the tracks shown below the toggle stay put as they're consumed one at a time, rather
+    /// than the whole list churning when a track starts.
     func refreshAutoplay() async {
-        guard autoplayEnabled, let seed = queue.items.last else {
-            autoplayTracks = []; autoplaySeedId = nil; return
-        }
-        if seed.id == autoplaySeedId, !autoplayTracks.isEmpty { return }
+        guard autoplayEnabled else { autoplayTracks = []; autoplaySeedId = nil; return }
+        guard autoplayTracks.isEmpty, let seed = queue.items.last else { return }
         autoplaySeedId = seed.id
         let mix = (try? await client.fetchInstantMix(itemId: seed.id, limit: 20)) ?? []
-        guard autoplaySeedId == seed.id else { return }   // seed changed mid-fetch
+        guard autoplayTracks.isEmpty else { return }   // filled meanwhile
         let queued = Set(queue.items.map(\.id))
         autoplayTracks = mix.filter { !queued.contains($0.id) }
     }
@@ -702,14 +841,14 @@ final class Player {
             rebuild(at: 0, autoplay: false)
             return
         }
-        let mix = autoplayTracks
-        autoplayTracks = []
-        autoplaySeedId = nil
+        // Move just ONE track up into the queue (above the toggle) and play it; the rest of the mix
+        // stays below the toggle.
+        let track = autoplayTracks.removeFirst()
         let startIndex = queue.items.count
-        queue.items.append(contentsOf: mix)
+        queue.items.append(track)
         queue.originalItems = queue.items
         rebuild(at: startIndex, autoplay: true)
-        await refreshAutoplay()   // seed the following batch
+        if autoplayTracks.isEmpty { await refreshAutoplay() }   // refill so the toggle always has a list below it
     }
 
     private func readyDuration(_ item: AVPlayerItem) -> Double {
@@ -730,13 +869,18 @@ final class Player {
         currentPlayerItem = nil
         lookaheadItem = nil
         lookaheadIndex = nil
+        lookaheadTrackId = nil
     }
 
     // MARK: - Audio session
 
     private func configureAudioSession() {
 #if os(iOS) || os(tvOS)
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .default)
+        // Incidental system sounds (keyboard clicks, UI alerts, etc.) interrupt a .playback session by
+        // default — which paused/ducked music whenever a keyboard appeared. Opt out so they don't.
+        try? session.setPrefersNoInterruptionsFromSystemAlerts(true)
 #endif
     }
 
@@ -761,13 +905,15 @@ final class Player {
         notificationObservers.append(
             nc.addObserver(forName: AVAudioSession.interruptionNotification,
                            object: nil, queue: .main) { [weak self] note in
-                Task { @MainActor [weak self] in self?.handleInterruption(note) }
+                // The observer fires on `.main` (the main actor's queue), so assert isolation and call
+                // synchronously — avoids capturing the non-Sendable Notification in a `@Sendable` Task.
+                MainActor.assumeIsolated { self?.handleInterruption(note) }
             }
         )
         notificationObservers.append(
             nc.addObserver(forName: AVAudioSession.routeChangeNotification,
                            object: nil, queue: .main) { [weak self] note in
-                Task { @MainActor [weak self] in self?.handleRouteChange(note) }
+                MainActor.assumeIsolated { self?.handleRouteChange(note) }
             }
         )
 #endif
@@ -879,6 +1025,7 @@ final class Player {
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         info[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
+        info[MPMediaItemPropertyPlaybackDuration] = duration
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
 #endif
     }
@@ -887,6 +1034,7 @@ final class Player {
 #if canImport(MediaPlayer)
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
+        info[MPMediaItemPropertyPlaybackDuration] = duration   // keep the lock-screen scrubber length in sync
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
 #endif
     }
@@ -941,6 +1089,7 @@ final class Player {
         }
         cc.nextTrackCommand.isEnabled = true
         cc.previousTrackCommand.isEnabled = true
+        cc.changePlaybackPositionCommand.isEnabled = true   // make the lock-screen scrubber draggable
 #endif
     }
 }

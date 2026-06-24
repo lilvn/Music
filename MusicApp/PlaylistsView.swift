@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 // MARK: - Playlists tab
 
@@ -20,12 +21,11 @@ struct PlaylistsView: View {
                         Text("Playlists")
                             .font(.largeTitle).fontWeight(.bold)
                         Spacer()
-                        Button { newName = ""; showCreate = true } label: {
+                        // Same GlassCircleButton as the playlist detail's "+", so the two are identical.
+                        GlassCircleButton(action: { newName = ""; showCreate = true }) {
                             Image(systemName: "plus")
                                 .font(.title3.weight(.semibold))
                                 .foregroundStyle(.primary)
-                                .frame(width: 40, height: 40)
-                                .contentShape(Rectangle())
                         }
                     }
                     .padding(.horizontal, DS.hPad)
@@ -38,10 +38,10 @@ struct PlaylistsView: View {
                         CenteredState(systemImage: "wifi.exclamationmark", title: "Couldn't load playlists") {
                             Button("Try Again") { Task { await load() } }.buttonStyle(.bordered)
                         }
-                    } else if playlists.isEmpty {
-                        CenteredState(systemImage: "music.note.list", title: "No playlists yet")
                     } else {
                         LazyVGrid(columns: cols, spacing: DS.gridSpacing + 4) {
+                            // Pinned, non-deletable favourites tile — always first.
+                            LibraryLink(route: .likedSongs) { LikedSongsCard() }
                             ForEach(playlists) { p in
                                 LibraryLink(route: .playlist(p)) { PlaylistCard(playlist: p) }
                             }
@@ -60,6 +60,12 @@ struct PlaylistsView: View {
                 Button("Create") { create() }
             }
             .task { if playlists.isEmpty { await load() } }
+            // Drop a playlist from the grid the moment it's deleted from its long-press menu.
+            .onReceive(NotificationCenter.default.publisher(for: .playlistDeleted)) { note in
+                if let id = note.object as? String {
+                    withAnimation { playlists.removeAll { $0.id == id } }
+                }
+            }
         }
     }
 
@@ -69,6 +75,8 @@ struct PlaylistsView: View {
         do { playlists = try await client.fetchPlaylists() }
         catch { loadFailed = true }
         isLoading = false
+        // Warm the grid's covers so they're ready as you scroll, not loaded lazily on appear.
+        ImageStore.shared.prefetch(playlists.map { client.artworkURL(for: $0, size: 400) }, maxPixel: 400)
     }
 
     private func create() {
@@ -79,6 +87,105 @@ struct PlaylistsView: View {
             await load()
         }
     }
+
+}
+
+extension Notification.Name {
+    /// Posted (with the playlist id as `object`) when a playlist is deleted, so the grid can update.
+    static let playlistDeleted = Notification.Name("playlistDeleted")
+}
+
+// MARK: - Square image cropper (move & scale before setting a playlist cover)
+
+struct CropImage: Identifiable { let id = UUID(); let image: UIImage }
+
+/// Pan + pinch to frame an image inside a square, then renders the framed square to a UIImage.
+struct ImageCropper: View {
+    let image: UIImage
+    let onCrop: (UIImage) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var side: CGFloat = 320   // crop-square size (set from geometry; used by the toolbar)
+    @State private var scale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var liveScale: CGFloat = 1
+    @State private var liveOffset: CGSize = .zero
+
+    var body: some View {
+        NavigationStack {
+            GeometryReader { geo in
+                let s = max(120, min(geo.size.width, geo.size.height) - 32)
+                ZStack {
+                    Color.black
+                    framed(s, scale: scale * liveScale,
+                           offset: CGSize(width: offset.width + liveOffset.width,
+                                          height: offset.height + liveOffset.height))
+                        .overlay(Rectangle().stroke(.white.opacity(0.9), lineWidth: 2))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(
+                    SimultaneousGesture(
+                        MagnifyGesture()
+                            .onChanged { liveScale = $0.magnification }
+                            .onEnded { v in
+                                scale = min(max(scale * v.magnification, 1), 6)
+                                liveScale = 1
+                                withAnimation(.spring(response: 0.3)) { clampOffset(s) }
+                            },
+                        DragGesture()
+                            .onChanged { liveOffset = $0.translation }
+                            .onEnded { v in
+                                offset.width += v.translation.width
+                                offset.height += v.translation.height
+                                liveOffset = .zero
+                                withAnimation(.spring(response: 0.3)) { clampOffset(s) }
+                            }
+                    )
+                )
+                .onAppear { side = s }
+                .onChange(of: s) { side = $1 }
+            }
+            .background(Color.black.ignoresSafeArea())
+            .navigationTitle("Move and Scale")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Use") { exportAndDismiss(side) }.fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    private func framed(_ s: CGFloat, scale: CGFloat, offset: CGSize) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFill()
+            .frame(width: s, height: s)
+            .scaleEffect(scale)
+            .offset(offset)
+            .frame(width: s, height: s)
+            .clipped()
+    }
+
+    private func clampOffset(_ s: CGFloat) {
+        let aspect = image.size.width / max(1, image.size.height)
+        let dispW = aspect >= 1 ? s * aspect : s
+        let dispH = aspect >= 1 ? s : s / aspect
+        let maxX = max(0, (dispW * scale - s) / 2)
+        let maxY = max(0, (dispH * scale - s) / 2)
+        offset.width = min(max(offset.width, -maxX), maxX)
+        offset.height = min(max(offset.height, -maxY), maxY)
+    }
+
+    @MainActor private func exportAndDismiss(_ s: CGFloat) {
+        let renderer = ImageRenderer(content: framed(s, scale: scale, offset: offset))
+        renderer.scale = 1000 / s   // ~1000px square output
+        if let ui = renderer.uiImage { onCrop(ui) }
+        dismiss()
+    }
 }
 
 struct PlaylistCard: View {
@@ -88,17 +195,12 @@ struct PlaylistCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             LibraryImage(url: client.artworkURL(for: playlist, size: 400), maxPixel: 400) {
-                Color(.systemGray6)
-                    .overlay {
-                        Image(systemName: "music.note.list")
-                            .font(.title2)
-                            .foregroundStyle(Color(.systemGray4))
-                    }
+                ArtworkPlaceholder()
             }
             .aspectRatio(1, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: DS.cornerCard, style: .continuous))
-            .shadow(color: .black.opacity(DS.shadowOpacity), radius: DS.shadowRadius, y: DS.shadowY)
+            .artworkShadow()
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(playlist.name)
@@ -120,7 +222,10 @@ struct PlaylistDetailView: View {
     @Environment(Player.self) private var player
     @State private var tracks: [MediaItem] = []
     @State private var isLoading = true
-    @State private var editMode: EditMode = .inactive
+    @State private var showAddMusic = false
+    @State private var pickedImage: PhotosPickerItem?
+    @State private var cropImage: CropImage?
+    @State private var coverVersion = 0
     @Namespace private var trackHighlightNS
 
     var body: some View {
@@ -153,48 +258,85 @@ struct PlaylistDetailView: View {
                             onRemove: { remove(track) },
                             highlightNamespace: trackHighlightNS)
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                        .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                         .trackSwipeActions(onPlayNext: { player.playNext(track) },
                                            onPlayLast: { player.playLast(track) },
                                            onRemove: { remove(track) })
                 }
-                .onMove(perform: move)
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background { ArtworkBackground(url: coverURL, animated: false) }
         .scrollIndicators(.hidden)
-        .animation(.spring(response: 0.4, dampingFraction: 0.82), value: player.currentItem?.id)
+        // (highlight animation lives on the row itself — see SongRow — so it never reaches the nav bar)
         .navigationBarTitleDisplayMode(.inline)
-        .environment(\.editMode, $editMode)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if !tracks.isEmpty {
-                    Button(editMode.isEditing ? "Done" : "Edit") {
-                        withAnimation { editMode = editMode.isEditing ? .inactive : .active }
-                    }
-                }
+        // Back button + the "+" (Add Music) both fade out together on close.
+        .fadingDetailHeader {
+            GlassCircleButton(action: { showAddMusic = true }) {
+                Image(systemName: "plus")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
             }
         }
-        .task {
-            tracks = (try? await client.fetchPlaylistItems(playlistId: playlist.id)) ?? []
-            isLoading = false
+        .sheet(isPresented: $showAddMusic, onDismiss: { Task { await reload() } }) {
+            AddMusicToPlaylistSheet(playlistId: playlist.id)
+        }
+        .sheet(item: $cropImage) { item in
+            ImageCropper(image: item.image) { uploadCover($0) }
+        }
+        .onChange(of: pickedImage) { _, item in loadForCrop(item) }
+        .task { await reload() }
+    }
+
+    private func reload() async {
+        tracks = (try? await client.fetchPlaylistItems(playlistId: playlist.id)) ?? []
+        isLoading = false
+    }
+
+    /// Cover URL built straight from the playlist id (so it resolves even when the fetched item has no
+    /// image tag — e.g. right after the first upload), cache-busted so a new cover shows immediately.
+    private var coverURL: URL? {
+        client.primaryImageURL(itemId: playlist.id, size: 600, cacheBust: coverVersion)
+    }
+
+    private func loadForCrop(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        Task {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let ui = UIImage(data: data) else { return }
+            cropImage = CropImage(image: ui)   // present the framing UI before uploading
+            pickedImage = nil
+        }
+    }
+
+    private func uploadCover(_ cropped: UIImage) {
+        Task {
+            guard let jpeg = cropped.jpegData(compressionQuality: 0.85) else { return }
+            try? await client.uploadPrimaryImage(itemId: playlist.id, jpeg: jpeg)
+            coverVersion += 1   // bust the cache so the new cover loads
         }
     }
 
     private var header: some View {
         VStack(spacing: 0) {
-            LibraryImage(url: client.artworkURL(for: playlist, size: 600), maxPixel: 600) {
-                Color(.secondarySystemBackground)
-                    .overlay {
-                        Image(systemName: "music.note.list")
-                            .font(.system(size: 56, weight: .ultraLight))
-                            .foregroundStyle(.tertiary)
+            // Centered square cover (NOT a bleeding artist-profile hero). Tap it to set a new image.
+            PhotosPicker(selection: $pickedImage, matching: .images) {
+                LibraryImage(url: coverURL, maxPixel: 600) { ArtworkPlaceholder() }
+                    .frame(width: 240, height: 240)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.cornerArtwork, style: .continuous))
+                    .artworkShadow()
+                    .overlay(alignment: .bottomTrailing) {
+                        Image(systemName: "camera.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(9)
+                            .background(.black.opacity(0.5), in: Circle())
+                            .padding(10)
                     }
             }
-            .frame(width: 240, height: 240)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: .black.opacity(0.2), radius: 18, y: 10)
-            .frame(maxWidth: .infinity)
+            .buttonStyle(.plain)
 
             Text(playlist.name)
                 .font(.title2).fontWeight(.bold)
@@ -205,25 +347,37 @@ struct PlaylistDetailView: View {
                 .font(.footnote).foregroundStyle(.secondary)
                 .padding(.top, 4)
 
-            playButton.padding(.vertical, 18)
+            actions
+                .padding(.horizontal, DS.hPad)
+                .padding(.top, 18)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
     }
 
-    private var playButton: some View {
-        Button {
-            guard !tracks.isEmpty else { return }
-            player.play(items: tracks, from: 0)
-        } label: {
-            Label("Play", systemImage: "play.fill")
-                .font(.headline)
-                .foregroundStyle(Color(.systemBackground))
-                .padding(.horizontal, 44)
-                .padding(.vertical, 14)
-                .background(Color.primary, in: .capsule)
+    /// Play / Shuffle / Play Next / Play Last — the 2×2 grid the artist view uses.
+    private var actions: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                action("Play", "play.fill") { player.play(items: tracks, from: 0) }
+                action("Shuffle", "shuffle") { player.play(items: tracks, from: 0, shuffled: true) }
+            }
+            HStack(spacing: 12) {
+                action("Play Next", "text.line.first.and.arrowtriangle.forward") { player.playNext(tracks) }
+                action("Play Last", "text.line.last.and.arrowtriangle.forward") { player.playLast(tracks) }
+            }
         }
-        .buttonStyle(.plain)
+    }
+
+    private func action(_ title: String, _ icon: String, _ run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity).frame(height: 46)
+                .glassEffect(.regular.interactive(), in: .capsule)
+        }
+        .buttonStyle(ScaleButtonStyle())
         .disabled(tracks.isEmpty)
     }
 
@@ -233,14 +387,6 @@ struct PlaylistDetailView: View {
         Task { try? await client.removeFromPlaylist(playlist.id, entryIds: [entryId]) }
     }
 
-    private func move(from offsets: IndexSet, to destination: Int) {
-        tracks.move(fromOffsets: offsets, toOffset: destination)
-        guard let src = offsets.first else { return }
-        // New index of the moved entry after the local move.
-        let newIndex = destination > src ? destination - 1 : destination
-        guard tracks.indices.contains(newIndex), let entryId = tracks[newIndex].playlistItemId else { return }
-        Task { try? await client.movePlaylistItem(playlist.id, entryId: entryId, to: newIndex) }
-    }
 }
 
 // MARK: - 3D-touch / long-press menu for containers (album / playlist)
@@ -270,6 +416,15 @@ struct LibraryItemMenu: ViewModifier {
                 }
                 Button { Task { addRequest = PlaylistAddRequest(itemIds: await trackIds()) } } label: {
                     Label("Add to Playlist", systemImage: "text.badge.plus")
+                }
+                if item.type == "Playlist" {
+                    Divider()
+                    Button(role: .destructive) {
+                        Task {
+                            try? await client.deletePlaylist(item.id)
+                            NotificationCenter.default.post(name: .playlistDeleted, object: item.id)
+                        }
+                    } label: { Label("Delete Playlist", systemImage: "trash") }
                 }
             }
             .sheet(item: $addRequest) { PlaylistPickerSheet(request: $0) }
@@ -318,11 +473,10 @@ struct PlaylistPickerSheet: View {
                             Button { add(to: p) } label: {
                                 HStack(spacing: 12) {
                                     LibraryImage(url: client.artworkURL(for: p, size: 120), maxPixel: 160) {
-                                        Color(.systemGray6)
-                                            .overlay { Image(systemName: "music.note.list").foregroundStyle(Color(.systemGray4)) }
+                                        ArtworkPlaceholder()
                                     }
                                     .frame(width: 44, height: 44)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .clipShape(RoundedRectangle(cornerRadius: DS.cornerThumb, style: .continuous))
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(p.name).foregroundStyle(.primary).lineLimit(1)
                                         if let c = p.childCount {
@@ -361,5 +515,108 @@ struct PlaylistPickerSheet: View {
             _ = try? await client.createPlaylist(name: name, itemIds: request.itemIds)
             dismiss()
         }
+    }
+}
+
+// MARK: - Add music to a playlist (search → tap to add)
+
+struct AddMusicToPlaylistSheet: View {
+    let playlistId: String
+    @Environment(JellyfinClient.self) private var client
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var results: [MediaItem] = []
+    @State private var resultCache: [String: [MediaItem]] = [:]
+    @State private var recentlyAdded: [MediaItem] = []
+    @State private var recommended: [MediaItem] = []
+    @State private var isSearching = false
+    @State private var added: Set<String> = []
+
+    private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
+    private var songs: [MediaItem] { results.filter { $0.type == "Audio" } }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if trimmed.isEmpty {
+                    // Nothing typed → suggest tracks to add.
+                    if !recentlyAdded.isEmpty {
+                        Section("Recently Added") { ForEach(recentlyAdded) { addRow($0) } }
+                    }
+                    if !recommended.isEmpty {
+                        Section("Recommended") { ForEach(recommended) { addRow($0) } }
+                    }
+                } else {
+                    ForEach(songs) { addRow($0) }
+                }
+            }
+            .listStyle(.plain)
+            .overlay {
+                if trimmed.isEmpty && recentlyAdded.isEmpty && recommended.isEmpty {
+                    ProgressView()
+                } else if !trimmed.isEmpty && songs.isEmpty && !isSearching {
+                    ContentUnavailableView("No songs", systemImage: "magnifyingglass",
+                                           description: Text("No songs matching “\(query)”."))
+                }
+            }
+            .searchable(text: $query, prompt: "Songs")
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .navigationTitle("Add Music")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .task { await loadSuggestions() }
+            .task(id: query) {
+                let anim = Animation.easeInOut(duration: 0.22)
+                guard !trimmed.isEmpty else { withAnimation(anim) { results = []; isSearching = false }; return }
+                if let cached = resultCache[trimmed] {
+                    withAnimation(anim) { results = cached; isSearching = false }; return
+                }
+                isSearching = true
+                try? await Task.sleep(for: .milliseconds(280))
+                guard !Task.isCancelled else { return }
+                let found = (try? await client.search(query: trimmed)) ?? []
+                guard !Task.isCancelled else { return }
+                resultCache[trimmed] = found
+                withAnimation(anim) { results = found; isSearching = false }
+            }
+        }
+    }
+
+    private func loadSuggestions() async {
+        guard recentlyAdded.isEmpty, recommended.isEmpty else { return }
+        async let recent = client.fetchRecentlyAddedSongs(limit: 30)
+        async let recs = client.fetchMostPlayed(limit: 30)
+        recentlyAdded = (try? await recent) ?? []
+        recommended = (try? await recs) ?? []
+    }
+
+    @ViewBuilder
+    private func addRow(_ song: MediaItem) -> some View {
+        Button { add(song) } label: {
+            HStack(spacing: 12) {
+                LibraryImage(url: client.artworkURL(for: song, size: 160), maxPixel: 160) {
+                    ArtworkPlaceholder()
+                }
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: DS.cornerThumb, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(song.name).foregroundStyle(.primary).lineLimit(1)
+                    Text(song.primaryArtist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: added.contains(song.id) ? "checkmark.circle.fill" : "plus.circle")
+                    .font(.title3)
+                    .foregroundStyle(added.contains(song.id) ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
+                    .contentTransition(.symbolEffect(.replace))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func add(_ song: MediaItem) {
+        guard !added.contains(song.id) else { return }
+        withAnimation { _ = added.insert(song.id) }
+        Task { try? await client.addToPlaylist(playlistId, itemIds: [song.id]) }
     }
 }

@@ -7,6 +7,7 @@ import CoreSpotlight
 struct RootTabView: View {
     @Environment(Player.self) private var player
     @Environment(JellyfinClient.self) private var client
+    @Environment(\.colorScheme) private var colorScheme
     @State private var selection: RootTab = .home
     @State private var spotlightRoute: LibraryRoute?
     @State private var homePath = NavigationPath()
@@ -17,15 +18,18 @@ struct RootTabView: View {
 
         TabView(selection: $selection) {
             Tab("Home", systemImage: "house.fill", value: RootTab.home) {
-                HomeView(navPath: $homePath)
+                HomeView(navPath: $homePath).miniBarClearance()
             }
             Tab("Albums", systemImage: "square.stack.fill", value: RootTab.albums) {
-                AlbumsView()
+                AlbumsView().miniBarClearance()
             }
             Tab("Playlists", systemImage: "music.note.list", value: RootTab.playlists) {
-                PlaylistsView()
+                PlaylistsView().miniBarClearance()
             }
-            Tab("Search", systemImage: "magnifyingglass", value: RootTab.search) {
+            Tab(value: RootTab.search, role: .search) {
+                // No manual miniBarClearance here: the native search tab manages its own bottom
+                // assembly (the mini bar sits above the search field, and both rise with the keyboard).
+                // A manual safe-area inset fights that and mis-stacks them.
                 SearchView()
             }
         }
@@ -34,7 +38,7 @@ struct RootTabView: View {
         // ONLY while a track is loaded, so there's no empty bar when idle.
         .tabViewBottomAccessory {
             if player.currentItem != nil {
-                MiniPlayer(namespace: npZoom)
+                MiniPlayer(namespace: npZoom, appColorScheme: colorScheme)
             }
         }
         // Now Playing zoom-expands from the mini player. `fullScreenCover` (not `.sheet`) is what
@@ -58,17 +62,23 @@ struct RootTabView: View {
                     }
             }
         }
-        // Now Playing asked to view an album/artist: it closed itself first; push it into the Home
-        // tab (so the tab bar + mini player stay) once the player has finished dismissing.
-        .onChange(of: player.showNowPlaying) { _, shown in
-            guard !shown, let route = player.pendingRoute else { return }
-            player.pendingRoute = nil
+        // Now Playing asked to view an album/artist. Push it into the Home tab FIRST (behind the still-open
+        // player), THEN close the player — so the detail is already there when it dismisses, with no
+        // intermediate flash of the Home root.
+        .onChange(of: player.pendingRoute) { _, route in
+            guard let route else { return }
             selection = .home
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { homePath.append(route) }
+            homePath.append(route)
+            player.pendingRoute = nil
+            player.showNowPlaying = false
         }
         .task { await SpotlightIndexer.reindex(client) }
+        // Pre-load the keyboard once it's idle, so the first Search use doesn't lag / stall playback.
+        .task { try? await Task.sleep(for: .milliseconds(500)); KeyboardWarmer.warmUp() }
         // No local session yet (fresh install) → show the server's last-played track in the mini bar.
         .task { await player.restoreFromServerIfNeeded() }
+        // Prime the Liked Songs set so hearts + the playlist count render correctly from launch.
+        .task { await client.refreshFavorites() }
         .onContinueUserActivity(CSSearchableItemActionType) { activity in
             guard let id = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return }
             Task { spotlightRoute = await SpotlightIndexer.route(forIdentifier: id, client: client) }
@@ -77,3 +87,21 @@ struct RootTabView: View {
 }
 
 enum RootTab: Hashable { case home, albums, playlists, search }
+
+/// Reserves bottom room so scrollable tab content (and pushed detail views) clears the floating mini
+/// player when a track is loaded — the bottom accessory isn't added to the scroll content inset
+/// automatically, so the last rows would otherwise hide behind it.
+private struct MiniBarClearance: ViewModifier {
+    @Environment(Player.self) private var player
+    func body(content: Content) -> some View {
+        content.safeAreaInset(edge: .bottom, spacing: 0) {
+            if player.currentItem != nil {
+                Color.clear.frame(height: 64)
+            }
+        }
+    }
+}
+
+extension View {
+    func miniBarClearance() -> some View { modifier(MiniBarClearance()) }
+}

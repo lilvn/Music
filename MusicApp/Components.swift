@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Design constants
 
@@ -6,10 +7,11 @@ enum DS {
     static let hPad: CGFloat = 20          // horizontal padding for lists
     static let gridPad: CGFloat = 16       // horizontal padding for grids
     static let gridSpacing: CGFloat = 12   // spacing between grid cells
-    static let cornerCard: CGFloat = 16    // album / artist cards
-    static let cornerArtwork: CGFloat = 26 // large artwork (album detail, now playing)
-    static let cornerThumb: CGFloat = 10   // row thumbnails
-    static let cornerMini: CGFloat = 11    // mini player artwork
+    // Subtle artwork rounding, in line with Apple Music / Spotify / YouTube Music (nearly square).
+    static let cornerCard: CGFloat = 8     // album / artist cards
+    static let cornerArtwork: CGFloat = 12 // large artwork (album detail, now playing)
+    static let cornerThumb: CGFloat = 6    // row thumbnails
+    static let cornerMini: CGFloat = 8     // mini player artwork
     static let shadowRadius: CGFloat = 8
     static let shadowY: CGFloat = 4
     static let shadowOpacity: CGFloat = 0.12
@@ -26,34 +28,32 @@ struct ArtworkGradient: View {
     let url: URL?
     var blur: CGFloat = 40
     var animated: Bool = true
+    @State private var spin = false
+    @State private var breathe = false
 
     private var image: some View {
-        LibraryImage(url: url, maxPixel: 240) { Color(white: 0.16) }
+        LibraryImage(url: url, maxPixel: 160) { Color(white: 0.16) }
             .aspectRatio(contentMode: .fill)
             .blur(radius: blur, opaque: true)
             .saturation(1.4)
     }
 
     var body: some View {
-        if animated {
-            // Lava-lamp flow: a slow CONTINUOUS rotation plus a lazy elliptical drift and gentle
-            // breathing, so the colours keep flowing in one direction rather than pulsing back and
-            // forth. Offsets are proportional to the view, so it works at any size (full-screen
-            // background → 36pt CD). 30fps keeps it cheap; the caller clips/masks the overflow.
-            GeometryReader { geo in
-                let maxSide = max(geo.size.width, geo.size.height)
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-                    let t = context.date.timeIntervalSinceReferenceDate
-                    image
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .scaleEffect(1.42 + 0.1 * sin(t * 0.31))
-                        .rotationEffect(.degrees(t * 3.5))
-                        .offset(x: maxSide * 0.09 * sin(t * 0.23),
-                                y: maxSide * 0.09 * cos(t * 0.19))
+        // Lava-lamp flow driven by GPU-interpolated `repeatForever` animations (NOT a per-frame
+        // TimelineView): the blurred image is rasterised once and only the cheap scale/rotate/offset
+        // transforms animate — a slow continuous spin for one-directional flow plus a lazy breathe.
+        GeometryReader { geo in
+            image
+                .frame(width: geo.size.width, height: geo.size.height)
+                .scaleEffect(animated ? (breathe ? 1.5 : 1.34) : 1.06)
+                .offset(x: animated ? geo.size.width * (breathe ? 0.05 : -0.05) : 0,
+                        y: animated ? geo.size.height * (breathe ? -0.04 : 0.04) : 0)
+                .rotationEffect(.degrees(animated && spin ? 360 : 0))
+                .onAppear {
+                    guard animated else { return }
+                    withAnimation(.linear(duration: 95).repeatForever(autoreverses: false)) { spin = true }
+                    withAnimation(.easeInOut(duration: 12).repeatForever(autoreverses: true)) { breathe = true }
                 }
-            }
-        } else {
-            image.scaleEffect(1.06)
         }
     }
 }
@@ -63,30 +63,46 @@ struct ArtworkGradient: View {
 struct PlayingIndicator: View {
     let url: URL?
     let active: Bool
-    private let count = 4
+    @Environment(Player.self) private var player
+
+    // Each bar runs a continuous wave (so it's always lively, like the Dynamic Island) whose PEAK
+    // height scales with the live audio level — quiet → small waves, a beat → bars jump. Flat when
+    // paused. Only ~1–2 of these are ever on-screen, so the per-frame TimelineView is cheap here.
+    private let speeds: [Double] = [6.1, 8.3, 5.2, 7.4, 6.7]
+    private let phases: [Double] = [0.0, 1.7, 3.1, 0.8, 2.4]
+    private let minH: CGFloat = 3
+    private let maxH: CGFloat = 16
 
     var body: some View {
-        TimelineView(.animation(paused: !active)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            ArtworkGradient(url: url, blur: 4, animated: false)
-                .saturation(1.3)
-                .mask {
-                    HStack(spacing: 2.5) {
-                        ForEach(0..<count, id: \.self) { i in
-                            Capsule().frame(width: 2.5, height: barHeight(i, t))
+        // The blurred-gradient FILL is rendered once (outside the TimelineView); only the small bar
+        // mask animates per frame, so the gradient/blur isn't re-evaluated every tick.
+        ArtworkGradient(url: url, blur: 4, animated: false)
+            .saturation(1.6)
+            .brightness(0.24)   // lift it off the same-art background so the bars stand out
+            .mask {
+                // Cap at ~30 fps (the audio level updates at 30 Hz anyway) so the bars don't redraw at
+                // a 120 Hz ProMotion rate — that was a needless GPU/thermal cost in long lists.
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !active)) { context in
+                    let t = context.date.timeIntervalSinceReferenceDate
+                    let level = active ? min(1, max(0, player.audioLevel)) : 0
+                    HStack(spacing: 2) {
+                        ForEach(speeds.indices, id: \.self) { i in
+                            Capsule().frame(width: 2.5, height: barHeight(i, t, CGFloat(level)))
                         }
                     }
-                    .frame(height: 16)
+                    .frame(width: 22, height: 16)
+                    // Ease the bars down to flat (and back up) on pause/play instead of snapping.
+                    .animation(.easeOut(duration: 0.3), value: active)
                 }
-        }
-        .frame(width: 20, height: 16)
+            }
+            .frame(width: 22, height: 16)
     }
 
-    private func barHeight(_ i: Int, _ t: Double) -> CGFloat {
-        guard active else { return 4 }
-        let beat = sin(t * 5.5 + Double(i) * 1.1) + 0.5 * sin(t * 8.7 + Double(i) * 0.7)
-        let v = max(0, min(1, (beat / 1.5 + 1) / 2))   // 0…1, layered for a beat-like pulse
-        return 4 + CGFloat(v) * 12                      // 4…16
+    private func barHeight(_ i: Int, _ t: Double, _ level: CGFloat) -> CGFloat {
+        guard active else { return minH }
+        let osc = (sin(t * speeds[i] + phases[i]) + 1) / 2   // 0…1 wave
+        let peak = 0.32 + 0.68 * level                       // amplitude grows with the audio
+        return minH + (maxH - minH) * CGFloat(osc) * peak
     }
 }
 
@@ -94,8 +110,9 @@ struct PlayingIndicator: View {
 /// foreground (adaptive `.primary` / `.secondary` text) stays legible in both light and dark mode.
 struct ArtworkBackground: View {
     let url: URL?
+    var animated: Bool = true
     var body: some View {
-        ArtworkGradient(url: url, blur: 55)
+        ArtworkGradient(url: url, blur: 38, animated: animated)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
             .overlay(Color(.systemBackground).opacity(0.5))
@@ -112,9 +129,12 @@ struct ArtworkBackground: View {
 /// the `.id` + `.transition` actually fire when used inside a `.background` / `.presentationBackground`.
 struct CrossfadeBackground: View {
     let url: URL?
+    /// Pass `false` where a moving gradient behind Liquid Glass would force a costly per-frame re-blur
+    /// (e.g. the Up Next sheet) — the cross-fade between tracks still animates.
+    var animated: Bool = true
     var body: some View {
         ZStack {
-            ArtworkBackground(url: url)
+            ArtworkBackground(url: url, animated: animated)
                 .id(url)
                 .transition(.opacity)
         }
@@ -172,6 +192,92 @@ extension EnvironmentValues {
     var libraryPush: (LibraryRoute) -> Void {
         get { self[LibraryPushKey.self] }
         set { self[LibraryPushKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// The unified album-artwork drop shadow (matches the featured cover-flow artwork). Applied to all
+    /// cover art — cards, detail covers, the now-playing hero — so artwork sits on the page the same way.
+    func artworkShadow() -> some View {
+        shadow(color: .black.opacity(0.25), radius: 11, y: 7)
+    }
+
+    /// A liquid-glass back button (plus optional trailing header content, e.g. a "+") rendered in a real
+    /// view bar — NOT the system toolbar — so its opacity actually animates: it fades out on close exactly
+    /// the way it fades in. The bar reserves its own space at the top (a custom nav bar) and keeps the
+    /// edge swipe-to-go-back.
+    func fadingDetailHeader() -> some View {
+        modifier(FadingDetailHeader(trailing: EmptyView()))
+    }
+    func fadingDetailHeader<T: View>(@ViewBuilder trailing: () -> T) -> some View {
+        modifier(FadingDetailHeader(trailing: trailing()))
+    }
+}
+
+/// A glass circular button matching the system toolbar look — used for the back button and the header
+/// "+" so they're identical everywhere.
+struct GlassCircleButton<Label: View>: View {
+    var action: () -> Void
+    @ViewBuilder var label: () -> Label
+    var body: some View {
+        Button(action: action) {
+            label()
+                .frame(width: 36, height: 36)
+                .glassEffect(.regular.interactive(), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+}
+
+private struct FadingDetailHeader<Trailing: View>: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+    @State private var visible = false
+    @State private var closing = false
+
+    let trailing: Trailing
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaInset(edge: .top, spacing: 0) { bar }   // a custom nav bar that reserves its own space
+            .toolbar(.hidden, for: .navigationBar)   // no system bar — we draw our own, so opacity animates
+        // Recognise the left-edge back-swipe ourselves and route it through the SAME close() as the tap,
+        // so the buttons fade out identically whether you tap or swipe.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 18)
+                .onChanged { v in
+                    guard !closing,
+                          v.startLocation.x < 32,
+                          v.translation.width > 70,
+                          abs(v.translation.height) < 60 else { return }
+                    close()
+                }
+        )
+        .onAppear { withAnimation(.easeOut(duration: 0.3)) { visible = true } }
+    }
+
+    private var bar: some View {
+        HStack(spacing: 0) {
+            GlassCircleButton(action: close) {
+                Image(systemName: "chevron.backward")
+                    .font(.body.weight(.semibold)).foregroundStyle(.primary)
+            }
+            .accessibilityLabel("Back")
+            Spacer(minLength: 0)
+            trailing
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .opacity(visible ? 1 : 0)   // a real view, so this fades reliably in BOTH directions
+    }
+
+    /// Fade the header out AND pop at the same time, so the buttons fade as the view zooms away — one
+    /// smooth motion. (The old fade-then-dismiss-in-completion sequence read as janky and was race-prone.)
+    private func close() {
+        guard !closing else { return }
+        closing = true
+        withAnimation(.easeOut(duration: 0.2)) { visible = false }
+        dismiss()
     }
 }
 
@@ -234,7 +340,7 @@ private struct RouteMenu: ViewModifier {
         switch route {
         case .album(let m), .playlist(let m): content.libraryItemMenu(m)
         case .albumSong(let m, _): content.libraryItemMenu(m)
-        case .artist: content
+        case .artist, .likedSongs: content
         }
     }
 }
@@ -246,6 +352,7 @@ func destinationView(for route: LibraryRoute) -> some View {
     case .artist(let artist):     ArtistDetailView(artist: artist)
     case .playlist(let playlist): PlaylistDetailView(playlist: playlist)
     case .albumSong(let album, let songId): AlbumDetailView(album: album, highlightSongId: songId)
+    case .likedSongs:             LikedSongsView()
     }
 }
 
@@ -274,7 +381,7 @@ struct AlbumCard: View {
             .aspectRatio(1, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: DS.cornerCard, style: .continuous))
-            .shadow(color: .black.opacity(DS.shadowOpacity), radius: DS.shadowRadius, y: DS.shadowY)
+            .artworkShadow()
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(album.name)
@@ -348,8 +455,19 @@ struct SongRow: View {
     var highlightNamespace: Namespace.ID? = nil
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
+    @Environment(\.libraryPush) private var push
 
     private var isCurrent: Bool { player.currentItem?.id == song.id }
+
+    /// The song's ALBUM artist (the page that lists it) — falls back to the track performers.
+    private var artistRoute: LibraryRoute? {
+        guard let a = song.albumArtists?.first ?? song.artistItems?.first else { return nil }
+        return .artist(MediaItem(id: a.id, name: a.name, type: "MusicArtist",
+                                 sortName: nil, albumArtist: nil, albumArtists: nil, album: nil, albumId: nil,
+                                 artistItems: nil, indexNumber: nil, parentIndexNumber: nil, runTimeTicks: nil,
+                                 productionYear: nil, imageTags: nil, albumPrimaryImageTag: nil, childCount: nil,
+                                 overview: nil, playlistItemId: nil))
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -376,6 +494,10 @@ struct SongRow: View {
                 }
             }
         }
+        // Animate the highlight HERE, scoped to the row — NOT page-wide on `player.currentItem`. A
+        // page-level animation on a navigation destination leaks into the nav bar and makes the back
+        // button slide/disappear when the track changes while the page is on screen.
+        .animation(.spring(response: 0.4, dampingFraction: 0.82), value: isCurrent)
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
         .contextMenu {
@@ -387,6 +509,9 @@ struct SongRow: View {
             }
             if let onAddToPlaylist {
                 Button { onAddToPlaylist() } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }
+            }
+            if let artistRoute {
+                Button { push(artistRoute) } label: { Label("Go to Artist", systemImage: "music.mic") }
             }
             if let onRemove {
                 Button(role: .destructive) { onRemove() } label: { Label("Remove from Playlist", systemImage: "minus.circle") }
@@ -405,11 +530,7 @@ struct SongRow: View {
         } else {
             Group {
                 if isCurrent {
-                    if player.isPlaying {
-                        PlayingIndicator(url: client.artworkURL(for: song, size: 160), active: true)
-                    } else {
-                        Image(systemName: "pause.fill").font(.caption).foregroundStyle(.primary)
-                    }
+                    PlayingIndicator(url: client.artworkURL(for: song, size: 160), active: player.isPlaying)
                 } else if let num = trackNumber ?? song.indexNumber {
                     Text("\(num)")
                         .font(.footnote).monospacedDigit()
@@ -587,19 +708,25 @@ struct ArtistDetailView: View {
             }
         }
         .scrollIndicators(.hidden)
-        .ignoresSafeArea(edges: .top)
         .navigationBarTitleDisplayMode(.inline)
+        .fadingDetailHeader()
         .task {
             albums = (try? await client.fetchAlbums(artistId: artist.id)) ?? []
             isLoading = false
         }
     }
 
-    /// Play / Shuffle all of the artist's songs (fetched on tap, in album order).
+    /// Play / Shuffle / Play Next / Play Last — all of the artist's songs (fetched on tap, in album order).
     private var playRow: some View {
-        HStack(spacing: 12) {
-            artistAction(title: "Play", icon: "play.fill") { playAll(shuffled: false) }
-            artistAction(title: "Shuffle", icon: "shuffle") { playAll(shuffled: true) }
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                artistAction(title: "Play", icon: "play.fill") { playAll(shuffled: false) }
+                artistAction(title: "Shuffle", icon: "shuffle") { playAll(shuffled: true) }
+            }
+            HStack(spacing: 12) {
+                artistAction(title: "Play Next", icon: "text.line.first.and.arrowtriangle.forward") { queueAll(next: true) }
+                artistAction(title: "Play Last", icon: "text.line.last.and.arrowtriangle.forward") { queueAll(next: false) }
+            }
         }
     }
 
@@ -619,6 +746,14 @@ struct ArtistDetailView: View {
         Task {
             let songs = (try? await client.fetchArtistSongs(artistId: artist.id)) ?? []
             if !songs.isEmpty { player.play(items: songs, from: 0, shuffled: shuffled) }
+        }
+    }
+
+    private func queueAll(next: Bool) {
+        Task {
+            let songs = (try? await client.fetchArtistSongs(artistId: artist.id)) ?? []
+            guard !songs.isEmpty else { return }
+            next ? player.playNext(songs) : player.playLast(songs)
         }
     }
 

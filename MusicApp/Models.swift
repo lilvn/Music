@@ -116,6 +116,7 @@ enum LibraryRoute: Hashable, Identifiable {
     case artist(MediaItem)
     case playlist(MediaItem)
     case albumSong(MediaItem, String)   // open an album and highlight a song by id
+    case likedSongs                     // the favourites-backed "Liked Songs"
 
     var id: String {
         switch self {
@@ -123,6 +124,7 @@ enum LibraryRoute: Hashable, Identifiable {
         case .artist(let m):          return "artist-\(m.id)"
         case .playlist(let m):        return "playlist-\(m.id)"
         case .albumSong(let m, let s): return "album-\(m.id)-song-\(s)"
+        case .likedSongs:             return "liked-songs"
         }
     }
 }

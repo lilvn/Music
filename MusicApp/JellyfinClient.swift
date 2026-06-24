@@ -15,6 +15,14 @@ final class JellyfinClient {
     private(set) var userId: String
     private(set) var username: String
 
+    /// Ids of the user's favourite (liked) songs — drives the Now Playing heart + Liked Songs.
+    var favoriteIds: Set<String> = []
+
+    // Caches for IMMUTABLE content, so re-opening an album or the lyrics sheet is instant (no refetch).
+    // MainActor-isolated (the whole client is), so plain dictionaries are safe here.
+    @ObservationIgnored private var albumTrackCache: [String: [MediaItem]] = [:]
+    @ObservationIgnored private var lyricsCache: [String: [LyricLine]] = [:]
+
     var isAuthenticated: Bool { !serverURL.isEmpty && !accessToken.isEmpty && !userId.isEmpty }
 
     private enum Keys {
@@ -70,7 +78,7 @@ final class JellyfinClient {
     }
 
     func signOut() {
-        serverURL = ""; accessToken = ""; userId = ""; username = ""
+        serverURL = ""; accessToken = ""; userId = ""; username = ""; favoriteIds = []
         let d = UserDefaults.standard
         [Keys.server, Keys.token, Keys.userId, Keys.username].forEach { d.removeObject(forKey: $0) }
     }
@@ -152,6 +160,14 @@ final class JellyfinClient {
     }
 
     /// Tracks of an album (sorted by disc/track) or any container.
+    /// Album tracklist, cached — albums are immutable, so it never goes stale.
+    func fetchAlbumTracks(albumId: String) async throws -> [MediaItem] {
+        if let cached = albumTrackCache[albumId] { return cached }
+        let tracks = try await fetchTracks(parentId: albumId)
+        albumTrackCache[albumId] = tracks
+        return tracks
+    }
+
     func fetchTracks(parentId: String) async throws -> [MediaItem] {
         try await fetchItems(path: "Users/\(userId)/Items", query: [
             q("ParentId", parentId),
@@ -207,6 +223,35 @@ final class JellyfinClient {
         ])
     }
 
+    /// Recently added songs (newest first) — used to suggest tracks when adding music to a playlist.
+    func fetchRecentlyAddedSongs(limit: Int = 30) async throws -> [MediaItem] {
+        try await fetchItems(path: "Users/\(userId)/Items", query: [
+            q("IncludeItemTypes", "Audio"),
+            q("SortBy", "DateCreated"),
+            q("SortOrder", "Descending"),
+            q("Limit", "\(limit)"),
+            q("Recursive", "true"),
+            q("Fields", "PrimaryImageAspectRatio,AlbumArtist,Album,AlbumId,RunTimeTicks"),
+            q("ImageTypeLimit", "1"),
+            q("EnableImageTypes", "Primary"),
+        ])
+    }
+
+    /// The user's most-played songs, most-played first (by server play count).
+    func fetchMostPlayed(limit: Int = 16) async throws -> [MediaItem] {
+        try await fetchItems(path: "Users/\(userId)/Items", query: [
+            q("IncludeItemTypes", "Audio"),
+            q("SortBy", "PlayCount"),
+            q("SortOrder", "Descending"),
+            q("Filters", "IsPlayed"),
+            q("Limit", "\(limit)"),
+            q("Recursive", "true"),
+            q("Fields", "PrimaryImageAspectRatio,AlbumArtist,Album,AlbumId,RunTimeTicks"),
+            q("ImageTypeLimit", "1"),
+            q("EnableImageTypes", "Primary"),
+        ])
+    }
+
     /// Server-generated "instant mix" of songs similar to `itemId` — powers Autoplay when the queue
     /// runs out (most-relevant first).
     func fetchInstantMix(itemId: String, limit: Int = 20) async throws -> [MediaItem] {
@@ -234,7 +279,7 @@ final class JellyfinClient {
     func search(query: String) async throws -> [MediaItem] {
         try await fetchItems(path: "Users/\(userId)/Items", query: [
             q("SearchTerm", query),
-            q("IncludeItemTypes", "Audio,MusicAlbum,MusicArtist"),
+            q("IncludeItemTypes", "Audio,MusicAlbum,MusicArtist,Playlist"),
             q("Recursive", "true"),
             q("Limit", "60"),
             q("Fields", "PrimaryImageAspectRatio,SortName,AlbumArtist,Album,RunTimeTicks,AlbumId"),
@@ -243,12 +288,15 @@ final class JellyfinClient {
     }
 
     func fetchLyrics(itemId: String) async throws -> [LyricLine] {
+        if let cached = lyricsCache[itemId] { return cached }
         guard let req = request("Audio/\(itemId)/Lyrics") else { throw APIError.invalidURL }
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0)
         }
-        return try JSONDecoder().decode(LyricResponse.self, from: data).lyrics
+        let lines = try JSONDecoder().decode(LyricResponse.self, from: data).lyrics
+        lyricsCache[itemId] = lines
+        return lines
     }
 
     // MARK: - Playlist editing
@@ -280,6 +328,51 @@ final class JellyfinClient {
 
     func deletePlaylist(_ id: String) async throws {
         try await sendMutation("Items/\(id)", method: "DELETE", query: [])
+    }
+
+    // MARK: - Favourites (liked songs)
+
+    /// Favourite songs, newest first (DateCreated descending) — the Liked Songs list.
+    func fetchFavoriteSongs() async throws -> [MediaItem] {
+        try await fetchItems(path: "Items", query: [
+            q("userId", userId),
+            q("Filters", "IsFavorite"),
+            q("IncludeItemTypes", "Audio"),
+            q("Recursive", "true"),
+            q("SortBy", "DateCreated"),
+            q("SortOrder", "Descending"),
+            q("Fields", "PrimaryImageAspectRatio,AlbumArtist,Album,AlbumId,RunTimeTicks"),
+            q("ImageTypeLimit", "1"),
+            q("EnableImageTypes", "Primary"),
+        ])
+    }
+
+    /// Refresh the cached set of favourite ids (so the heart reflects the current state).
+    func refreshFavorites() async {
+        guard isAuthenticated else { return }
+        let songs = (try? await fetchFavoriteSongs()) ?? []
+        favoriteIds = Set(songs.map(\.id))
+    }
+
+    func isFavorite(_ itemId: String) -> Bool { favoriteIds.contains(itemId) }
+
+    /// Toggle an item's favourite state (optimistic local update + server mutation).
+    func setFavorite(_ itemId: String, _ favorite: Bool) async {
+        if favorite { favoriteIds.insert(itemId) } else { favoriteIds.remove(itemId) }
+        try? await sendMutation("Users/\(userId)/FavoriteItems/\(itemId)",
+                                method: favorite ? "POST" : "DELETE", query: [])
+    }
+
+    /// Set an item's primary (cover) image — Jellyfin wants the bytes base64-encoded in the body.
+    func uploadPrimaryImage(itemId: String, jpeg: Data) async throws {
+        guard let base = baseURL else { throw APIError.invalidURL }
+        var req = URLRequest(url: base.appendingPathComponent("Items/\(itemId)/Images/Primary"))
+        req.httpMethod = "POST"
+        req.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        req.httpBody = jpeg.base64EncodedData()
+        let (_, resp) = try await URLSession.shared.data(for: req)
+        try ensureOK(resp)
     }
 
     /// Move a playlist entry (its `playlistItemId`) to a new position.
@@ -333,6 +426,21 @@ final class JellyfinClient {
             q("maxHeight", "\(size)"), q("maxWidth", "\(size)"),
             q("quality", "90"), q("api_key", accessToken),
         ]
+        return comps?.url
+    }
+
+    /// Primary-image URL built directly from an item id, IGNORING the cached image tag — so it resolves
+    /// even when the fetched item has no tag yet (e.g. a playlist whose cover was just uploaded).
+    /// `cacheBust` forces a fresh fetch past the URL/decoded caches after an upload.
+    func primaryImageURL(itemId: String, size: Int = 600, cacheBust: Int = 0) -> URL? {
+        guard let base = baseURL else { return nil }
+        var comps = URLComponents(url: base.appendingPathComponent("Items/\(itemId)/Images/Primary"),
+                                  resolvingAgainstBaseURL: false)
+        comps?.queryItems = [
+            q("maxHeight", "\(size)"), q("maxWidth", "\(size)"),
+            q("quality", "90"), q("api_key", accessToken),
+        ]
+        if cacheBust > 0 { comps?.queryItems?.append(q("cb", "\(cacheBust)")) }
         return comps?.url
     }
 

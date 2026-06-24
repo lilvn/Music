@@ -1,81 +1,142 @@
 import SwiftUI
 
-/// The Up Next queue, presented as a Liquid-Glass sheet from Now Playing. Tap a row to jump to it;
-/// swipe to remove (the current track can't be removed); shuffle (bottom-left) and repeat
-/// (bottom-right) are glass buttons pinned to the corners.
+/// The Up Next queue, presented as a Liquid-Glass sheet from Now Playing. One unified list holds the
+/// queue, the Autoplay divider, and the suggestion mix, so a track can be dragged ACROSS the divider to
+/// move between the queue and Autoplay. Tap a row to jump to it; swipe to remove; shuffle/repeat are
+/// pinned to the bottom corners.
 struct UpNextView: View {
     @Environment(Player.self) private var player
     @Environment(JellyfinClient.self) private var client
     @Environment(\.dismiss) private var dismiss
     @Namespace private var highlightNS
 
-    var body: some View {
-        NavigationStack {
-            ScrollViewReader { proxy in
-            List {
-                ForEach(Array(player.queue.items.enumerated()), id: \.offset) { index, item in
-                    row(index: index, item: item)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 6, trailing: 20))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .contentShape(Rectangle())
-                        .onTapGesture { player.play(at: index) }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            if index != player.queue.currentIndex {
-                                Button(role: .destructive) {
-                                    player.removeFromQueue(at: index)
-                                } label: { Label("Remove", systemImage: "trash") }
-                                .tint(.red)
-                            }
-                        }
-                }
-                .onMove { player.moveInQueue(from: $0, to: $1) }
-
-                autoplaySection
+    /// One entry in the unified list: a queue/Autoplay track, or the Autoplay toggle divider.
+    private enum Entry: Identifiable {
+        case track(item: MediaItem, autoplay: Bool, index: Int, uid: String)
+        case toggle
+        var id: String {
+            switch self {
+            case .track(_, _, _, let uid): return uid
+            case .toggle: return "__toggle__"
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .scrollIndicators(.hidden)
-            // Glass highlight glides between rows; the Autoplay section fades when it changes.
-            .animation(.spring(response: 0.4, dampingFraction: 0.82), value: player.queue.currentIndex)
-            .animation(.easeInOut(duration: 0.4), value: player.autoplayTracks.count)
-            .task { await player.refreshAutoplay() }
-            // Open scrolled to the current track.
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    proxy.scrollTo(player.queue.currentIndex, anchor: .center)
-                }
-            }
-            // The shuffle / repeat controls live in a bottom inset (not a ZStack overlay over the
-            // List) so the list never competes with them for taps.
-            .safeAreaInset(edge: .bottom) {
-                HStack {
-                    GlassToggle(system: "shuffle", active: player.queue.isShuffled) { player.toggleShuffle() }
-                    Spacer()
-                    GlassToggle(system: player.queue.repeatMode.systemImage,
-                                active: player.queue.repeatMode.isActive) { player.cycleRepeat() }
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
-            }
-            .navigationTitle("Up Next")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }.fontWeight(.semibold)
-                }
-            }
-            }   // ScrollViewReader
-        }
-        .presentationBackground {
-            CrossfadeBackground(url: client.artworkURL(for: player.currentItem ?? .placeholder, size: 400))
         }
     }
 
-    /// Apple-Music-style Autoplay footer: a toggle, with the next auto-played track shown below it.
+    private var entries: [Entry] {
+        // The same song can appear MORE THAN ONCE in the queue (e.g. you "play next" a playlist that
+        // contains the current track). A plain `item.id` would collide and SwiftUI's ForEach would drop
+        // the duplicate row — which is why the current track vanished. So tag each row with the item id
+        // PLUS its occurrence number: unique per row, and stable for the common (no-dupes) case.
+        var seen: [String: Int] = [:]
+        func uid(_ item: MediaItem) -> String {
+            let n = seen[item.id, default: 0]
+            seen[item.id] = n + 1
+            return "\(item.id)#\(n)"
+        }
+
+        var result = player.queue.items.enumerated().map {
+            Entry.track(item: $0.element, autoplay: false, index: $0.offset, uid: uid($0.element))
+        }
+        result.append(.toggle)
+        if player.autoplayEnabled {
+            result += player.autoplayTracks.enumerated().map {
+                Entry.track(item: $0.element, autoplay: true, index: $0.offset, uid: uid($0.element))
+            }
+        }
+        return result
+    }
+
+    private var currentID: String? {
+        let idx = player.queue.currentIndex
+        guard player.queue.items.indices.contains(idx) else { return nil }
+        let item = player.queue.items[idx]
+        // Match the row's uid (item id + its occurrence count) so scroll-to-current lands on it.
+        let occurrence = player.queue.items[0..<idx].filter { $0.id == item.id }.count
+        return "\(item.id)#\(occurrence)"
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                List {
+                    ForEach(entries) { entry in
+                        entryRow(entry)
+                    }
+                    .onMove { player.moveUpNext(from: $0, to: $1) }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.hidden)
+                // Glass highlight glides between rows; list insertions/removals fade.
+                .animation(.spring(response: 0.4, dampingFraction: 0.82), value: player.queue.currentIndex)
+                .animation(.easeInOut(duration: 0.35), value: player.queue.items.count)
+                .animation(.easeInOut(duration: 0.35), value: player.autoplayTracks.count)
+                .task { await player.refreshAutoplay() }
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        if let currentID { proxy.scrollTo(currentID, anchor: .center) }
+                    }
+                }
+                .safeAreaInset(edge: .bottom) {
+                    HStack {
+                        GlassToggle(system: "shuffle", active: player.queue.isShuffled) { player.toggleShuffle() }
+                        Spacer()
+                        GlassToggle(system: player.queue.repeatMode.systemImage,
+                                    active: player.queue.repeatMode.isActive) { player.cycleRepeat() }
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+                }
+                .navigationTitle("Up Next")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }.fontWeight(.semibold)
+                    }
+                }
+            }   // ScrollViewReader
+        }
+        .presentationBackground {
+            // Static (animated: false): a drifting gradient behind the list forces a costly per-frame
+            // re-blur and drops frames here. The track-to-track cross-fade still animates.
+            CrossfadeBackground(url: client.artworkURL(for: player.currentItem ?? .placeholder, size: 400),
+                                animated: false)
+        }
+    }
+
     @ViewBuilder
-    private var autoplaySection: some View {
+    private func entryRow(_ entry: Entry) -> some View {
+        switch entry {
+        case .toggle:
+            autoplayToggle
+                .listRowInsets(EdgeInsets(top: 18, leading: 20, bottom: 8, trailing: 20))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        case .track(let item, let autoplay, let index, _):
+            trackRow(item: item, autoplay: autoplay, index: index)
+                .opacity(autoplay ? 0.9 : 1)
+                .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 6, trailing: 20))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if autoplay { player.playAutoplayFrom(index) } else { player.play(at: index) }
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    if autoplay {
+                        Button(role: .destructive) { player.removeAutoplay(at: index) }
+                            label: { Label("Remove", systemImage: "trash") }.tint(.red)
+                    } else if index != player.queue.currentIndex {
+                        Button(role: .destructive) { player.removeFromQueue(at: index) }
+                            label: { Label("Remove", systemImage: "trash") }.tint(.red)
+                    }
+                }
+        }
+    }
+
+    /// Apple-Music-style Autoplay divider: an infinity icon, label, and the toggle.
+    private var autoplayToggle: some View {
         HStack(spacing: 12) {
             Image(systemName: "infinity")
                 .font(.system(size: 17, weight: .bold))
@@ -87,22 +148,48 @@ struct UpNextView: View {
                 .labelsHidden()
                 .tint(.green)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-        .padding(.bottom, 8)
-        .listRowInsets(EdgeInsets())
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
+    }
 
-        if player.autoplayEnabled {
-            ForEach(Array(player.autoplayTracks.enumerated()), id: \.offset) { i, track in
-                row(index: -1, item: track)
-                    .opacity(0.9)
-                    .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 6, trailing: 20))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .contentShape(Rectangle())
-                    .onTapGesture { player.playAutoplayFrom(i) }
+    private func trackRow(item: MediaItem, autoplay: Bool, index: Int) -> some View {
+        let isCurrent = !autoplay && index == player.queue.currentIndex
+        return HStack(spacing: 12) {
+            LibraryImage(url: client.artworkURL(for: item, size: 160), maxPixel: 180) {
+                ArtworkPlaceholder()
+            }
+            .frame(width: 52, height: 52)
+            .clipShape(RoundedRectangle(cornerRadius: DS.cornerThumb, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.name)
+                    .font(.body)
+                    .fontWeight(isCurrent ? .semibold : .regular)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(item.primaryArtist)
+                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            // The live waveform on the playing track; a grab handle on every other (reorderable) row.
+            if isCurrent {
+                PlayingIndicator(url: client.artworkURL(for: item, size: 160), active: player.isPlaying)
+            } else {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        // "Magnifier" selector that glides between rows. A SOLID fill (no material/blur): the live
+        // waveform redraws this row ~30fps, and a backdrop-blur highlight re-blurred the already-blurred
+        // sheet background every one of those frames — the main cause of the sluggish framerate here.
+        .background {
+            if isCurrent {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.primary.opacity(0.12))
+                    .matchedGeometryEffect(id: "upnextHighlight", in: highlightNS)
             }
         }
     }
@@ -126,53 +213,14 @@ struct UpNextView: View {
                     .foregroundStyle(active ? AnyShapeStyle(Color(.systemBackground)) : AnyShapeStyle(.primary))
                     .contentTransition(.symbolEffect(.replace))
                     .frame(width: 56, height: 56)
-                    .glassEffect(active ? .regular.tint(.primary).interactive() : .regular.interactive(), in: Circle())
+                    // No `.interactive()` — its own touch handling competed with the button and made
+                    // taps land inconsistently; ScaleButtonStyle already gives press feedback.
+                    .glassEffect(active ? .regular.tint(.primary) : .regular, in: Circle())
+                    .padding(8)                  // enlarge the tap target past the visible circle
+                    .contentShape(Rectangle())   // …and make the whole padded area hittable
             }
             .buttonStyle(ScaleButtonStyle())
             .sensoryFeedback(.impact(weight: .light), trigger: bump)
-        }
-    }
-
-    private func row(index: Int, item: MediaItem) -> some View {
-        let isCurrent = index == player.queue.currentIndex
-        return HStack(spacing: 12) {
-            LibraryImage(url: client.artworkURL(for: item, size: 160), maxPixel: 180) {
-                ArtworkPlaceholder()
-            }
-            .frame(width: 52, height: 52)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-            // Animated bars next to the title (not over the artwork).
-            if isCurrent {
-                PlayingIndicator(url: client.artworkURL(for: item, size: 160), active: player.isPlaying)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.name)
-                    .font(.body)
-                    .fontWeight(isCurrent ? .semibold : .regular)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(item.primaryArtist)
-                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-            }
-
-            Spacer()
-
-            if let dur = item.durationSeconds {
-                Text(dur.formattedDuration)
-                    .font(.footnote).foregroundStyle(.tertiary).monospacedDigit()
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        // Liquid-glass "magnifier" selector that glides between rows as the current track changes.
-        .background {
-            if isCurrent {
-                Color.clear
-                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 18))
-                    .matchedGeometryEffect(id: "upnextHighlight", in: highlightNS)
-            }
         }
     }
 }

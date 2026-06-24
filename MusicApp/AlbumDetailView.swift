@@ -9,6 +9,8 @@ struct AlbumDetailView: View {
     @State private var tracks: [MediaItem] = []
     @State private var isLoading = true
     @State private var addRequest: PlaylistAddRequest?
+    /// The highlighted row's tint, cleared ~1s after arrival so the highlight reads as a brief flash.
+    @State private var flashSongId: String?
     /// Full album metadata fetched by id (so an album opened from a track — e.g. Recently Played —
     /// still gets its name / year / artwork).
     @State private var albumDetail: MediaItem?
@@ -19,9 +21,11 @@ struct AlbumDetailView: View {
     private var info: MediaItem { albumDetail ?? album }
     private var totalSeconds: Double { tracks.reduce(0) { $0 + ($1.durationSeconds ?? 0) } }
 
-    /// A minimal artist item for navigation (ArtistDetailView fetches full metadata by id).
+    /// A minimal artist item for navigation (ArtistDetailView fetches full metadata by id). Prefer the
+    /// ALBUM artist — the artist whose page actually lists this album — over the track performers in
+    /// `artistItems`, which can be featured/secondary artists that lead to the wrong page.
     private var artistItem: MediaItem? {
-        guard let a = info.artistItems?.first ?? info.albumArtists?.first else { return nil }
+        guard let a = info.albumArtists?.first ?? info.artistItems?.first else { return nil }
         return MediaItem(id: a.id, name: a.name, type: "MusicArtist", sortName: nil, albumArtist: nil,
                          albumArtists: nil, album: nil, albumId: nil, artistItems: nil, indexNumber: nil,
                          parentIndexNumber: nil, runTimeTicks: nil, productionYear: nil, imageTags: nil,
@@ -69,8 +73,10 @@ struct AlbumDetailView: View {
                                 .id(track.id)
                                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                                 .listRowSeparator(.hidden)
-                                .listRowBackground(track.id == highlightSongId
-                                                   ? Color.primary.opacity(0.10) : Color.clear)
+                                .listRowBackground(
+                                    Color.primary.opacity(0.10)
+                                        .opacity(track.id == flashSongId ? 1 : 0)
+                                        .animation(.easeInOut(duration: 0.5), value: flashSongId))
                                 .trackSwipeActions(onPlayNext: { player.playNext(track) },
                                                    onPlayLast: { player.playLast(track) })
                         }
@@ -94,20 +100,24 @@ struct AlbumDetailView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background { ArtworkBackground(url: client.artworkURL(for: info, size: 400)) }
+        .background { ArtworkBackground(url: client.artworkURL(for: info, size: 400), animated: false) }
         .scrollIndicators(.hidden)
-        .animation(.spring(response: 0.4, dampingFraction: 0.82), value: player.currentItem?.id)
+        // (highlight animation lives on the row itself — see SongRow — so it never reaches the nav bar)
         .navigationBarTitleDisplayMode(.inline)
+        .fadingDetailHeader()
         .sheet(item: $addRequest) { PlaylistPickerSheet(request: $0) }
         .task {
+            flashSongId = highlightSongId   // tint the row from the first frame it appears
             async let detail = client.fetchItem(id: album.id)
-            async let trks = client.fetchTracks(parentId: album.id)
+            async let trks = client.fetchAlbumTracks(albumId: album.id)
             albumDetail = try? await detail
             tracks = (try? await trks) ?? []
             isLoading = false
             if let h = highlightSongId {
                 try? await Task.sleep(for: .milliseconds(300))
                 withAnimation(.easeInOut) { proxy.scrollTo(h, anchor: .center) }
+                try? await Task.sleep(for: .milliseconds(800))   // hold, then flash out
+                flashSongId = nil
             }
         }
         }   // ScrollViewReader
@@ -140,7 +150,7 @@ struct AlbumDetailView: View {
         }
         .frame(width: 240, height: 240)
         .clipShape(RoundedRectangle(cornerRadius: DS.cornerArtwork, style: .continuous))
-        .shadow(color: .black.opacity(0.2), radius: 18, y: 10)
+        .artworkShadow()
         .frame(maxWidth: .infinity)
     }
 

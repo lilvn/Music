@@ -8,28 +8,86 @@ import ImageIO
 final class ImageStore {
     static let shared = ImageStore()
 
-    private let cache = NSCache<NSURL, UIImage>()
+    private let cache = NSCache<NSString, UIImage>()
+    private let loader = Loader()
 
     private init() {
         cache.totalCostLimit = 120 * 1024 * 1024   // ~120 MB of decoded pixels
+        cache.countLimit = 500                      // and a hard cap on object count
     }
 
-    func cached(_ url: URL) -> UIImage? { cache.object(forKey: url as NSURL) }
+    // Keyed by url AND target size, so the same artwork can be cached at a small (blurred gradient)
+    // and a large (crisp foreground) resolution at once without one clobbering the other.
+    private func key(_ url: URL, _ maxPixel: CGFloat) -> NSString {
+        "\(url.absoluteString)#\(Int(maxPixel))" as NSString
+    }
+
+    func cached(_ url: URL, maxPixel: CGFloat) -> UIImage? { cache.object(forKey: key(url, maxPixel)) }
+
+    /// Warm the cache for a batch of artwork up front, so shelves/grids show their art immediately
+    /// instead of popping in as cells scroll into view. Work is off-main, downsampled, and `.utility`
+    /// priority (and the loader caps how many run at once), so it never blocks the UI — eager art
+    /// without the cost of rendering every cell eagerly.
+    func prefetch(_ urls: [URL?], maxPixel: CGFloat) {
+        for url in urls.compactMap({ $0 }) where cached(url, maxPixel: maxPixel) == nil {
+            Task.detached(priority: .utility) { _ = await ImageStore.shared.load(url, maxPixel: maxPixel) }
+        }
+    }
 
     /// Fetch (via the shared URLCache), downsample, decode, and cache — all off the main thread.
+    /// Concurrent requests for the SAME art coalesce into one download+decode, and the loader caps how
+    /// many distinct loads run at once so a fast scroll (or a prefetch batch) can't saturate the CPU /
+    /// network and stall playback.
     func load(_ url: URL, maxPixel: CGFloat) async -> UIImage? {
-        if let img = cached(url) { return img }
-        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
-        let img = await Task.detached(priority: .utility) { Self.downsample(data, maxPixel: maxPixel) }.value
-        if let img {
-            let cost = img.cgImage.map { $0.bytesPerRow * $0.height } ?? data.count
-            cache.setObject(img, forKey: url as NSURL, cost: cost)
+        let k = key(url, maxPixel)
+        if let img = cache.object(forKey: k) { return img }
+        return await loader.coalesced(k as String) { [cache] in
+            guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+            let img = await Task.detached(priority: .utility) { Self.downsample(data, maxPixel: maxPixel) }.value
+            if let img {
+                let cost = img.cgImage.map { $0.bytesPerRow * $0.height } ?? data.count
+                cache.setObject(img, forKey: k, cost: cost)
+            }
+            return img
         }
-        return img
     }
 
-    /// Decode + downsample to `maxPixel` using ImageIO (no intermediate full-size bitmap).
-    private static func downsample(_ data: Data, maxPixel: CGFloat) -> UIImage? {
+    /// De-duplicates in-flight loads (same key → one task, all callers await it) and gates how many
+    /// run concurrently with a small async semaphore.
+    private actor Loader {
+        private var inFlight: [String: Task<UIImage?, Never>] = [:]
+        private var active = 0
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        private let maxConcurrent = 6
+
+        func coalesced(_ key: String, _ build: @escaping () async -> UIImage?) async -> UIImage? {
+            if let existing = inFlight[key] { return await existing.value }
+            let task = Task { [weak self] () -> UIImage? in
+                await self?.acquire()
+                let result = await build()
+                await self?.release()
+                return result
+            }
+            inFlight[key] = task
+            let result = await task.value
+            inFlight[key] = nil
+            return result
+        }
+
+        private func acquire() async {
+            if active < maxConcurrent { active += 1; return }
+            await withCheckedContinuation { waiters.append($0) }   // resumed with a slot handed to us
+        }
+
+        private func release() {
+            if waiters.isEmpty { active -= 1 }
+            else { waiters.removeFirst().resume() }                // hand our slot straight to a waiter
+        }
+    }
+
+    /// Decode + downsample to `maxPixel` using ImageIO (no intermediate full-size bitmap). Pure work,
+    /// `nonisolated` so it runs on the detached decode task off the main actor.
+    private static nonisolated func downsample(_ data: Data, maxPixel: CGFloat) -> UIImage? {
         guard let src = CGImageSourceCreateWithData(data as CFData,
                                                     [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
         let opts: [CFString: Any] = [
@@ -61,7 +119,7 @@ struct LibraryImage<Placeholder: View>: View {
         self.contentMode = contentMode
         self.placeholder = placeholder()
         // Show a cached image immediately (no placeholder flash, no decode on appear).
-        _image = State(initialValue: url.flatMap { ImageStore.shared.cached($0) })
+        _image = State(initialValue: url.flatMap { ImageStore.shared.cached($0, maxPixel: maxPixel) })
     }
 
     var body: some View {
@@ -77,7 +135,7 @@ struct LibraryImage<Placeholder: View>: View {
         // clears first so stale art never lingers under the new title.
         .task(id: url) {
             guard let url else { image = nil; return }
-            if let cached = ImageStore.shared.cached(url) { image = cached; return }
+            if let cached = ImageStore.shared.cached(url, maxPixel: maxPixel) { image = cached; return }
             image = nil
             let loaded = await ImageStore.shared.load(url, maxPixel: maxPixel)
             if !Task.isCancelled { image = loaded }

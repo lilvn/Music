@@ -44,7 +44,7 @@ struct CoverFlowShelf: View {
                 .scrollClipDisabled()
                 .coordinateSpace(.named("coverflow"))
             }
-            .frame(height: coverSize * 1.5)
+            .frame(height: coverSize * 1.30)   // cover + the (trimmed) reflection zone below — see reflectionFraction
         }
         .padding(.top, topInset + 34)
         .padding(.bottom, -6)
@@ -94,6 +94,7 @@ struct ReflectedCover: View {
 
             cover(uiImage)
                 .offset(x: isCurrent ? -size * 0.1 : 0)
+                .artworkShadow()   // lift the upright cover off the page
                 .contentShape(Rectangle())
                 .onTapGesture { if isCurrent { push(.album(album)) } else { playAlbum() } }
         }
@@ -105,15 +106,19 @@ struct ReflectedCover: View {
         VStack(spacing: 0) {
             uprightArtwork
 
-            // Reflection mirrors the whole artwork (cover + CD); no menu here.
+            // Reflection mirrors the whole artwork (cover + CD); no menu here. We only reserve the part
+            // that's actually visible — the gradient has faded to clear by `reflectionFraction` down, so
+            // reserving the full half just left dead space under the shelf. Keep in sync with the shelf
+            // frame (coverSize * (1 + reflectionFraction)).
             ZStack(alignment: .top) {
+                let reflectionFraction: CGFloat = 0.30
                 artworkStack
                     .scaleEffect(y: -1)
-                    .frame(height: size * 0.5, alignment: .top)
+                    .frame(height: size * reflectionFraction, alignment: .top)
                     .mask(
                         LinearGradient(colors: [.white.opacity(0.18), .clear],
                                        startPoint: .top, endPoint: .bottom)
-                            .frame(width: size * 2.4, height: size * 0.5)
+                            .frame(width: size * 2.4, height: size * reflectionFraction)
                     )
 
                 VStack(spacing: 1) {
@@ -135,14 +140,14 @@ struct ReflectedCover: View {
         .frame(width: size)
         .task(id: album.id) {
             guard uiImage == nil, let url = client.artworkURL(for: album, size: 600) else { return }
-            if let cached = ImageStore.shared.cached(url) { uiImage = cached }
+            if let cached = ImageStore.shared.cached(url, maxPixel: 600) { uiImage = cached }
             else { uiImage = await ImageStore.shared.load(url, maxPixel: 600) }
         }
     }
 
     private func playAlbum() {
         Task {
-            let tracks = (try? await client.fetchTracks(parentId: album.id)) ?? []
+            let tracks = (try? await client.fetchAlbumTracks(albumId: album.id)) ?? []
             if !tracks.isEmpty { player.play(items: tracks, from: 0) }
         }
     }
@@ -174,6 +179,40 @@ struct ReflectedCover: View {
 
 // MARK: - Spinning CD (shared by the cover flow and the mini player)
 
+/// Spin anchor for a `SpinningDisc`, held as a reference so it can OUTLIVE the view. The mini bar uses
+/// the shared `.miniBar` instance, so its CD keeps spinning across tab switches (the bottom accessory's
+/// view is re-created each switch, which would otherwise reset per-view `@State` back to angle 0). The
+/// cover flow keeps its own per-view instance.
+@MainActor final class DiscSpinState {
+    var base: Double = 0
+    var ref: Date? = nil
+    var scrubAnchorAngle: Double = 0
+    var scrubAnchorProgress: Double = 0
+    var lastScrub: Double = 0
+    var isScrubbing = false
+
+    static let miniBar = DiscSpinState()
+
+    /// Freeze the current free-spin angle and anchor the scrub to `progress`. Call this SYNCHRONOUSLY the
+    /// instant a scrub begins (the mini bar does, from its gesture) so the disc's first scrubbed frame
+    /// reads a correct anchor instead of a stale one — that stale read is what made the CD jump on touch.
+    func beginScrub(progress: Double, now: Date) {
+        guard !isScrubbing else { return }                       // already anchored for this scrub
+        if let r = ref { base += now.timeIntervalSince(r) * SpinningDisc.spinSpeed; ref = nil }
+        scrubAnchorAngle = base
+        scrubAnchorProgress = progress
+        lastScrub = progress
+        isScrubbing = true
+    }
+
+    /// Fold the scrubbed rotation back into the base so the free spin resumes from where it landed.
+    func endScrub() {
+        guard isScrubbing else { return }
+        base = scrubAnchorAngle + (lastScrub - scrubAnchorProgress) * SpinningDisc.scrubTurns
+        isScrubbing = false
+    }
+}
+
 struct SpinningDisc: View {
     let artURL: URL?
     let size: CGFloat
@@ -181,6 +220,12 @@ struct SpinningDisc: View {
     /// When set (0…1), the disc angle TRACKS the scrub position instead of free-spinning, so dragging
     /// the playhead turns the disc. Folds back into the free spin continuously when the scrub ends.
     var scrubProgress: Double? = nil
+    /// Pass a persistent state (the mini bar's) so the spin survives the view being re-created on a tab
+    /// switch; nil → per-view state (cover flow).
+    var persistentSpin: DiscSpinState? = nil
+    /// When false the rotation TimelineView is paused — used for the mini bar's off-screen neighbour
+    /// discs so they don't animate while hidden.
+    var animating: Bool = true
 
     /// Disc geometry, shared by the cover-flow and the mini player so both pull out the same way:
     /// the disc is `diameterRatio` of the artwork and its centre slides out by `pullOutRatio`.
@@ -189,58 +234,55 @@ struct SpinningDisc: View {
 
     /// Shared so the mini-bar CD and the carousel CD turn at exactly the same rate.
     static let spinSpeed: Double = 48             // degrees / second
-    private static let scrubTurns: Double = 540   // degrees across the full scrub range
+    static let scrubTurns: Double = 540           // degrees across the full scrub range
 
     // Free spin is a pure function of (spinBase, spinRef): angle = spinBase + elapsed·speed, but only
     // while a segment is open (spinRef != nil). Stopping the spin or starting a scrub folds the elapsed
     // rotation into spinBase and closes the segment, so the visible angle never jumps — and the result
     // is independent of onChange ordering (the earlier cause of the disc "jumping randomly").
-    @State private var spinBase: Double = 0
-    @State private var spinRef: Date? = nil
-    @State private var scrubAnchorAngle: Double = 0
-    @State private var scrubAnchorProgress: Double = 0
-    @State private var lastScrub: Double = 0
+    @State private var localSpin = DiscSpinState()
+    private var s: DiscSpinState { persistentSpin ?? localSpin }
 
     private var freeSpinning: Bool { spinning && scrubProgress == nil }
 
     private func angle(at date: Date) -> Double {
         if let p = scrubProgress {
-            return scrubAnchorAngle + (p - scrubAnchorProgress) * Self.scrubTurns
+            return s.scrubAnchorAngle + (p - s.scrubAnchorProgress) * Self.scrubTurns
         }
-        if spinning, let ref = spinRef {
-            return spinBase + date.timeIntervalSince(ref) * Self.spinSpeed
+        if spinning, let ref = s.ref {
+            return s.base + date.timeIntervalSince(ref) * Self.spinSpeed
         }
-        return spinBase
+        return s.base
     }
 
     /// Open or close the free-spin segment to match the current state, folding any elapsed rotation
-    /// into `spinBase` so the displayed angle is continuous across the transition.
+    /// into `s.base` so the displayed angle is continuous across the transition.
     private func reconcile(_ now: Date) {
-        if freeSpinning, spinRef == nil {
-            spinRef = now
-        } else if !freeSpinning, let ref = spinRef {
-            spinBase += now.timeIntervalSince(ref) * Self.spinSpeed
-            spinRef = nil
+        if freeSpinning, s.ref == nil {
+            s.ref = now
+        } else if !freeSpinning, let ref = s.ref {
+            s.base += now.timeIntervalSince(ref) * Self.spinSpeed
+            s.ref = nil
         }
     }
 
     var body: some View {
-        TimelineView(.animation(paused: !freeSpinning)) { context in
+        TimelineView(.animation(paused: !freeSpinning || !animating)) { context in
             disc.rotationEffect(.degrees(angle(at: context.date)))
         }
-        .onAppear { reconcile(Date()) }
-        .onChange(of: spinning) { _, _ in reconcile(Date()) }
+        // Don't let spin (play/pause) reconciles reopen the free-spin segment mid-scrub — the scrub owns
+        // the angle until it ends. (Matters when several strips share `.miniBar`.)
+        .onAppear { if !s.isScrubbing { reconcile(Date()) } }
+        .onChange(of: spinning) { _, _ in if !s.isScrubbing { reconcile(Date()) } }
         .onChange(of: scrubProgress) { old, new in
             let now = Date()
-            if old == nil, new != nil {            // scrub began — close the spin at the current angle
-                reconcile(now)
-                scrubAnchorAngle = spinBase
-                scrubAnchorProgress = new ?? 0
+            if old == nil, new != nil {            // scrub began (idempotent — the mini bar anchors first)
+                s.beginScrub(progress: new ?? 0, now: now)
             } else if old != nil, new == nil {     // scrub ended — resume the spin from where it landed
-                spinBase = scrubAnchorAngle + (lastScrub - scrubAnchorProgress) * Self.scrubTurns
+                s.endScrub()
                 reconcile(now)
             }
-            if let new { lastScrub = new }
+            if let new { s.lastScrub = new }
         }
     }
 

@@ -50,5 +50,7 @@ struct AlbumsView: View {
         do { albums = try await client.fetchAlbums() }
         catch { loadFailed = true }
         isLoading = false
+        // Warm the grid's covers so they're ready as you scroll, not loaded lazily on appear.
+        ImageStore.shared.prefetch(albums.map { client.artworkURL(for: $0, size: 400) }, maxPixel: 400)
     }
 }
