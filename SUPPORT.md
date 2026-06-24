@@ -32,4 +32,4 @@ Playback continues when you switch to AirPlay or Bluetooth. Unplugging a wired/B
 
 ## Contact
 
-Need help or want to report a problem? Email **vivaannagpal1@gmail.com**.
+Need help or want to report a problem? Email **benjaminluvmaker@gmail.com**.
