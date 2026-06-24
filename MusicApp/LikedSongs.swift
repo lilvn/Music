@@ -107,8 +107,8 @@ struct LikedSongsView: View {
                     action("Shuffle", "shuffle") { player.play(items: tracks, from: 0, shuffled: true) }
                 }
                 HStack(spacing: 12) {
-                    action("Play Next", "text.line.first.and.arrowtriangle.forward") { player.playNext(tracks) }
                     action("Play Last", "text.line.last.and.arrowtriangle.forward") { player.playLast(tracks) }
+                    action("Play Next", "text.line.first.and.arrowtriangle.forward") { player.playNext(tracks) }
                 }
             }
             .padding(.horizontal, DS.hPad)

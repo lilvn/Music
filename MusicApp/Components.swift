@@ -337,7 +337,7 @@ private struct MatchedSourceIfAvailable: ViewModifier {
 private struct RouteMenu: ViewModifier {
     let route: LibraryRoute
     func body(content: Content) -> some View {
-        switch route {
+        switch route.kind {
         case .album(let m), .playlist(let m): content.libraryItemMenu(m)
         case .albumSong(let m, _): content.libraryItemMenu(m)
         case .artist, .likedSongs: content
@@ -347,7 +347,7 @@ private struct RouteMenu: ViewModifier {
 
 @ViewBuilder
 func destinationView(for route: LibraryRoute) -> some View {
-    switch route {
+    switch route.kind {
     case .album(let album):       AlbumDetailView(album: album)
     case .artist(let artist):     ArtistDetailView(artist: artist)
     case .playlist(let playlist): PlaylistDetailView(playlist: playlist)
@@ -724,8 +724,8 @@ struct ArtistDetailView: View {
                 artistAction(title: "Shuffle", icon: "shuffle") { playAll(shuffled: true) }
             }
             HStack(spacing: 12) {
-                artistAction(title: "Play Next", icon: "text.line.first.and.arrowtriangle.forward") { queueAll(next: true) }
                 artistAction(title: "Play Last", icon: "text.line.last.and.arrowtriangle.forward") { queueAll(next: false) }
+                artistAction(title: "Play Next", icon: "text.line.first.and.arrowtriangle.forward") { queueAll(next: true) }
             }
         }
     }

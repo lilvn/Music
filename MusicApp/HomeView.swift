@@ -93,7 +93,7 @@ struct FeaturedShelf: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
                     ForEach(albums) { album in
-                        LibraryLink(route: .album(album)) {
+                        LibraryLink(route: .album(album).zoomTagged("added")) {
                             FeaturedCard(album: album)
                                 .containerRelativeFrame(.horizontal)
                         }
@@ -242,7 +242,7 @@ struct RecentlyPlayedShelf: View {
                     ForEach(plays) { play in
                         let album = albumItem(for: play.track)
                         // Album → album detail; song → album detail with the song highlighted.
-                        LibraryLink(route: play.isAlbum ? .album(album) : .albumSong(album, play.track.id)) {
+                        LibraryLink(route: (play.isAlbum ? LibraryRoute.album(album) : .albumSong(album, play.track.id)).zoomTagged("recent")) {
                             card(track: play.track,
                                  title: play.isAlbum ? (play.track.album ?? play.track.name) : play.track.name,
                                  subtitle: play.track.primaryArtist)
@@ -301,7 +301,7 @@ struct MostPlayedShelf: View {
                 LazyHStack(spacing: 14) {
                     ForEach(tracks) { track in
                         // Tap opens the album detail with this song highlighted (does NOT start playback).
-                        LibraryLink(route: .albumSong(albumItem(for: track), track.id)) {
+                        LibraryLink(route: .albumSong(albumItem(for: track), track.id).zoomTagged("most")) {
                             card(track: track)
                         }
                     }

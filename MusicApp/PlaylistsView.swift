@@ -223,6 +223,7 @@ struct PlaylistDetailView: View {
     @State private var tracks: [MediaItem] = []
     @State private var isLoading = true
     @State private var showAddMusic = false
+    @State private var showCoverPicker = false
     @State private var pickedImage: PhotosPickerItem?
     @State private var cropImage: CropImage?
     @State private var coverVersion = 0
@@ -267,6 +268,7 @@ struct PlaylistDetailView: View {
             }
         }
         .listStyle(.plain)
+        .listSectionSpacing(0)   // kill the default header→tracks gap; the header owns its own cushion
         .scrollContentBackground(.hidden)
         .background { ArtworkBackground(url: coverURL, animated: false) }
         .scrollIndicators(.hidden)
@@ -321,22 +323,20 @@ struct PlaylistDetailView: View {
 
     private var header: some View {
         VStack(spacing: 0) {
-            // Centered square cover (NOT a bleeding artist-profile hero). Tap it to set a new image.
-            PhotosPicker(selection: $pickedImage, matching: .images) {
-                LibraryImage(url: coverURL, maxPixel: 600) { ArtworkPlaceholder() }
-                    .frame(width: 240, height: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: DS.cornerArtwork, style: .continuous))
-                    .artworkShadow()
-                    .overlay(alignment: .bottomTrailing) {
-                        Image(systemName: "camera.fill")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(9)
-                            .background(.black.opacity(0.5), in: Circle())
-                            .padding(10)
+            // Centered square cover — no camera badge. 3D-touch (long-press) it for "Edit Cover".
+            // `.contextMenuPreview` confines the lift/highlight to the rounded cover itself (the default
+            // region was the whole square frame + the shadow bounds around it).
+            LibraryImage(url: coverURL, maxPixel: 600) { ArtworkPlaceholder() }
+                .frame(width: 240, height: 240)
+                .clipShape(RoundedRectangle(cornerRadius: DS.cornerArtwork, style: .continuous))
+                .artworkShadow()
+                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: DS.cornerArtwork, style: .continuous))
+                .contextMenu {
+                    Button { showCoverPicker = true } label: {
+                        Label("Edit Cover", systemImage: "photo")
                     }
-            }
-            .buttonStyle(.plain)
+                }
+                .photosPicker(isPresented: $showCoverPicker, selection: $pickedImage, matching: .images)
 
             Text(playlist.name)
                 .font(.title2).fontWeight(.bold)
@@ -353,6 +353,7 @@ struct PlaylistDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
+        .padding(.bottom, 14)   // deliberate, consistent gap down to the first track
     }
 
     /// Play / Shuffle / Play Next / Play Last — the 2×2 grid the artist view uses.
@@ -363,8 +364,8 @@ struct PlaylistDetailView: View {
                 action("Shuffle", "shuffle") { player.play(items: tracks, from: 0, shuffled: true) }
             }
             HStack(spacing: 12) {
-                action("Play Next", "text.line.first.and.arrowtriangle.forward") { player.playNext(tracks) }
                 action("Play Last", "text.line.last.and.arrowtriangle.forward") { player.playLast(tracks) }
+                action("Play Next", "text.line.first.and.arrowtriangle.forward") { player.playNext(tracks) }
             }
         }
     }

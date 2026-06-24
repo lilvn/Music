@@ -111,22 +111,44 @@ struct AuthUser: Codable {
 // MARK: - Navigation
 
 /// Value-based push route. Identifiable so it can also drive a `.sheet(item:)`.
-enum LibraryRoute: Hashable, Identifiable {
-    case album(MediaItem)
-    case artist(MediaItem)
-    case playlist(MediaItem)
-    case albumSong(MediaItem, String)   // open an album and highlight a song by id
-    case likedSongs                     // the favourites-backed "Liked Songs"
+///
+/// `zoomTag` disambiguates the zoom-transition source when the SAME item is shown in more than one place
+/// (e.g. a song in both "Most Played" and "Recently Played"): without it both cards register the same
+/// matchedTransitionSource id and the card opens from the wrong one. The tag is part of `id` (so the
+/// source/destination are unique per tap) but is ignored by `destinationView` (same destination).
+struct LibraryRoute: Hashable, Identifiable {
+    enum Kind: Hashable {
+        case album(MediaItem)
+        case artist(MediaItem)
+        case playlist(MediaItem)
+        case albumSong(MediaItem, String)   // open an album and highlight a song by id
+        case likedSongs                     // the favourites-backed "Liked Songs"
+    }
+
+    var kind: Kind
+    var zoomTag: String = ""
 
     var id: String {
-        switch self {
-        case .album(let m):           return "album-\(m.id)"
-        case .artist(let m):          return "artist-\(m.id)"
-        case .playlist(let m):        return "playlist-\(m.id)"
-        case .albumSong(let m, let s): return "album-\(m.id)-song-\(s)"
-        case .likedSongs:             return "liked-songs"
+        let base: String
+        switch kind {
+        case .album(let m):            base = "album-\(m.id)"
+        case .artist(let m):           base = "artist-\(m.id)"
+        case .playlist(let m):         base = "playlist-\(m.id)"
+        case .albumSong(let m, let s): base = "album-\(m.id)-song-\(s)"
+        case .likedSongs:              base = "liked-songs"
         }
+        return zoomTag.isEmpty ? base : "\(base)#\(zoomTag)"
     }
+
+    /// Tag this route so its zoom source is unique to where it was tapped.
+    func zoomTagged(_ tag: String) -> LibraryRoute { var c = self; c.zoomTag = tag; return c }
+
+    // Constructors keep existing call sites (`.album(m)`, `.albumSong(m, s)`, `.likedSongs`, …) unchanged.
+    static func album(_ m: MediaItem) -> LibraryRoute { .init(kind: .album(m)) }
+    static func artist(_ m: MediaItem) -> LibraryRoute { .init(kind: .artist(m)) }
+    static func playlist(_ m: MediaItem) -> LibraryRoute { .init(kind: .playlist(m)) }
+    static func albumSong(_ m: MediaItem, _ s: String) -> LibraryRoute { .init(kind: .albumSong(m, s)) }
+    static let likedSongs = LibraryRoute(kind: .likedSongs)
 }
 
 // MARK: - Playback
