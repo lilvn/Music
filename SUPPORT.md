@@ -33,3 +33,8 @@ Playback continues when you switch to AirPlay or Bluetooth. Unplugging a wired/B
 ## Contact
 
 Need help or want to report a problem? Email **benjaminluvmaker@gmail.com**.
+
+---
+
+485 Music is published by **Nagora Studios Private Limited** (Mumbai, India).
+© 2026 Nagora Studios Private Limited. All rights reserved.

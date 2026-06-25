@@ -1,6 +1,7 @@
 # Privacy Policy
 
 **App:** 485 Music
+**Published by:** Nagora Studios Private Limited — Mumbai, India
 **Last updated:** June 24, 2026
 
 485 Music is a music player for your own self‑hosted [Jellyfin](https://jellyfin.org) media server. Your privacy is simple to describe because the app is built around one idea: **your data stays between your device and the server you choose.**
@@ -38,3 +39,7 @@ If this policy changes, the updated version will be posted on this page with a n
 ## Contact
 
 Questions about this policy? Email **benjaminluvmaker@gmail.com**.
+
+---
+
+© 2026 Nagora Studios Private Limited. All rights reserved.
