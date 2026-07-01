@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// First-launch sign-in: enter a server + username + password. On success the credentials persist and
-/// the app switches to the library. Liquid-Glass fields over a soft aura; nothing is baked into the app.
+/// First-launch sign-in: server + username + password. A plain native Form — no custom styling, glass or
+/// gradient (those re-composited on every keystroke and made typing janky). On success the credentials
+/// persist and the app switches to the library.
 struct LoginView: View {
     @Environment(JellyfinClient.self) private var client
     @State private var server = ""
@@ -19,97 +20,60 @@ struct LoginView: View {
     }
 
     var body: some View {
-        ZStack {
-            VStack(alignment: .leading, spacing: 0) {
-                Spacer()
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Sign In")
-                        .font(.largeTitle).fontWeight(.bold)
-                    Text("Enter your server and account details.")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }
-                .padding(.bottom, 28)
-
-                GlassEffectContainer(spacing: 14) {
-                    VStack(spacing: 14) {
-                        glassField {
-                            TextField("Server address", text: $server)
-                                .textContentType(.URL)
-                                .keyboardType(.URL)
-                                .submitLabel(.next)
-                                .focused($focus, equals: .server)
-                                .onSubmit { focus = .username }
-                        }
-                        glassField {
-                            TextField("Username", text: $username)
-                                .textContentType(.username)
-                                .submitLabel(.next)
-                                .focused($focus, equals: .username)
-                                .onSubmit { focus = .password }
-                        }
-                        glassField {
-                            SecureField("Password", text: $password)
-                                .textContentType(.password)
-                                .submitLabel(.go)
-                                .focused($focus, equals: .password)
-                                .onSubmit { if canSubmit { login() } }
-                        }
-                    }
-                }
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .font(.body)
-
-                if let error {
-                    Text(error)
-                        .font(.footnote).foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 16)
-                        .transition(.opacity)
-                }
-
-                signInButton
-                    .padding(.top, 22)
-
-                Spacer()
-                Spacer()
+        // A native Form — the most efficient way to host a few text fields. It handles keyboard
+        // avoidance itself and adds no custom rendering, so typing has nothing extra to redraw.
+        Form {
+            Section {
+                TextField("Server address", text: $server)
+                    .textContentType(.URL)
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .submitLabel(.next)
+                    .focused($focus, equals: .server)
+                    .onSubmit { focus = .username }
+                TextField("Username", text: $username)
+                    .textContentType(.username)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .submitLabel(.next)
+                    .focused($focus, equals: .username)
+                    .onSubmit { focus = .password }
+                SecureField("Password", text: $password)
+                    .textContentType(.password)
+                    .submitLabel(.go)
+                    .focused($focus, equals: .password)
+                    .onSubmit { if canSubmit { login() } }
             }
-            .padding(.horizontal, 28)
-        }
-    }
 
-    /// A text field floating on a Liquid-Glass rounded rect.
-    private func glassField<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        content()
-            .padding(.horizontal, 16)
-            .frame(height: 54)
-            .glassEffect(.regular, in: .rect(cornerRadius: 16))
-    }
-
-    private var signInButton: some View {
-        Button(action: login) {
-            Group {
-                if isLoading { ProgressView().tint(Color(.systemBackground)) }
-                else { Text("Continue").fontWeight(.semibold) }
+            if let error {
+                Text(error).foregroundStyle(.red)
             }
-            .frame(maxWidth: .infinity).frame(height: 54)
-            .foregroundStyle(canSubmit ? AnyShapeStyle(Color(.systemBackground)) : AnyShapeStyle(.secondary))
-            .glassEffect(canSubmit ? .regular.tint(.primary).interactive()
-                                   : .regular.interactive(), in: .capsule)
+
+            Section {
+                Button(action: login) {
+                    if isLoading { ProgressView() } else { Text("Sign In") }
+                }
+                .disabled(!canSubmit || isLoading)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(!canSubmit || isLoading)
+        .disabled(isLoading)
     }
 
     private func login() {
+        focus = nil               // drop the keyboard immediately so the spinner is visible
         isLoading = true
         error = nil
         Task {
             do {
                 try await client.authenticate(server: server, username: username, password: password)
             } catch {
-                self.error = "Couldn't sign in. Check the server address and your credentials."
+                // Tell the user which knob to turn rather than a catch-all — fewer blind retries.
+                if case APIError.httpError(401) = error {
+                    self.error = "Incorrect username or password."
+                } else {
+                    self.error = "Couldn't reach the server. Check the address and your connection."
+                }
             }
             isLoading = false
         }
@@ -120,7 +84,9 @@ struct LoginView: View {
 struct SettingsView: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
+    @Environment(AudioStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    @State private var storageText = "—"
 
     var body: some View {
         NavigationStack {
@@ -129,6 +95,24 @@ struct SettingsView: View {
                     LabeledContent("Address", value: client.serverURL)
                     LabeledContent("User", value: client.username)
                 }
+
+                Section {
+                    Toggle("Download over Wi-Fi", isOn: Binding(
+                        get: { store.offlineEnabled },
+                        set: { store.offlineEnabled = $0 }))
+                    LabeledContent("Downloaded", value: "\(store.downloadedIds.count) tracks")
+                    LabeledContent("Storage", value: storageText)
+                    Button("Clear Downloads", role: .destructive) {
+                        store.clearAll()
+                        storageText = byteText(0)
+                    }
+                    .disabled(store.downloadedIds.isEmpty)
+                } header: {
+                    Text("Offline")
+                } footer: {
+                    Text("Liked Songs, Most Played, and your playlists download automatically over Wi-Fi so they keep playing without a connection.")
+                }
+
                 Section {
                     Button("Sign Out", role: .destructive) {
                         player.stop()
@@ -142,6 +126,11 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
             }
+            .task { storageText = byteText(store.storageBytes()) }
         }
+    }
+
+    private func byteText(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 }

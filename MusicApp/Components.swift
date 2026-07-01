@@ -222,7 +222,7 @@ struct GlassCircleButton<Label: View>: View {
     var body: some View {
         Button(action: action) {
             label()
-                .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)   // matches the ~46pt play-row controls so it reads as a peer
                 .glassEffect(.regular.interactive(), in: Circle())
                 .contentShape(Circle())
         }
@@ -260,7 +260,7 @@ private struct FadingDetailHeader<Trailing: View>: ViewModifier {
         HStack(spacing: 0) {
             GlassCircleButton(action: close) {
                 Image(systemName: "chevron.backward")
-                    .font(.body.weight(.semibold)).foregroundStyle(.primary)
+                    .font(.title3.weight(.semibold)).foregroundStyle(.primary)
             }
             .accessibilityLabel("Back")
             Spacer(minLength: 0)
@@ -450,6 +450,7 @@ struct SongRow: View {
     var onPlayLast: (() -> Void)? = nil
     var onAddToPlaylist: (() -> Void)? = nil
     var onRemove: (() -> Void)? = nil
+    var removeLabel: String = "Remove from Playlist"
     var large: Bool = false
     /// When supplied, the current-track glass highlight glides between rows (matchedGeometry).
     var highlightNamespace: Namespace.ID? = nil
@@ -467,6 +468,16 @@ struct SongRow: View {
                                  artistItems: nil, indexNumber: nil, parentIndexNumber: nil, runTimeTicks: nil,
                                  productionYear: nil, imageTags: nil, albumPrimaryImageTag: nil, childCount: nil,
                                  overview: nil, playlistItemId: nil))
+    }
+
+    /// The song's album, opened with this song highlighted.
+    private var albumRoute: LibraryRoute? {
+        guard let albumId = song.albumId else { return nil }
+        return .albumSong(MediaItem(id: albumId, name: song.album ?? song.name, type: "MusicAlbum",
+                                    sortName: nil, albumArtist: song.albumArtist, albumArtists: nil, album: nil, albumId: nil,
+                                    artistItems: song.artistItems, indexNumber: nil, parentIndexNumber: nil, runTimeTicks: nil,
+                                    productionYear: nil, imageTags: nil, albumPrimaryImageTag: nil, childCount: nil,
+                                    overview: nil, playlistItemId: nil), song.id)
     }
 
     var body: some View {
@@ -507,14 +518,26 @@ struct SongRow: View {
             if let onPlayLast {
                 Button { onPlayLast() } label: { Label("Play Last", systemImage: "text.line.last.and.arrowtriangle.forward") }
             }
+            // Like / unlike — available on every track row, anywhere SongRow appears.
+            Button {
+                let liked = client.favoriteIds.contains(song.id)
+                Task { await client.setFavorite(song.id, !liked) }
+            } label: {
+                Label(client.favoriteIds.contains(song.id) ? "Remove from Liked Songs" : "Add to Liked Songs",
+                      systemImage: client.favoriteIds.contains(song.id) ? "heart.slash" : "heart")
+            }
             if let onAddToPlaylist {
                 Button { onAddToPlaylist() } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }
+            }
+            // Only where the row isn't already inside an album's tracklist (album detail uses numbers).
+            if showAlbumArt, let albumRoute {
+                Button { push(albumRoute) } label: { Label("Go to Album", systemImage: "square.stack") }
             }
             if let artistRoute {
                 Button { push(artistRoute) } label: { Label("Go to Artist", systemImage: "music.mic") }
             }
             if let onRemove {
-                Button(role: .destructive) { onRemove() } label: { Label("Remove from Playlist", systemImage: "minus.circle") }
+                Button(role: .destructive) { onRemove() } label: { Label(removeLabel, systemImage: "minus.circle") }
             }
         }
     }
@@ -675,19 +698,12 @@ struct ArtistDetailView: View {
     @State private var albums: [MediaItem] = []
     @State private var isLoading = true
 
-    private let heroHeight: CGFloat = 280
     private let cols = [GridItem(.adaptive(minimum: 160, maximum: 240), spacing: DS.gridSpacing)]
 
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                heroHeader
-
-                if !albums.isEmpty {
-                    playRow
-                        .padding(.horizontal, DS.hPad)
-                        .padding(.top, 14)
-                }
+                header
 
                 if isLoading {
                     ProgressView().padding(48)
@@ -703,7 +719,7 @@ struct ArtistDetailView: View {
                         }
                     }
                     .padding(.horizontal, DS.gridPad)
-                    .padding(.top, 16)
+                    .padding(.top, 18)
                 }
             }
         }
@@ -757,36 +773,38 @@ struct ArtistDetailView: View {
         }
     }
 
-    private var heroHeader: some View {
-        ZStack(alignment: .bottomLeading) {
-            LibraryImage(url: client.artworkURL(for: artist, size: 600), maxPixel: 700) {
-                Color(.systemGray5)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: heroHeight)
-            .clipped()
-
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0.3),
-                    .init(color: Color(.systemBackground).opacity(0.7), location: 0.75),
-                    .init(color: Color(.systemBackground), location: 1),
-                ],
-                startPoint: .top, endPoint: .bottom
-            )
-            .frame(height: heroHeight)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(artist.name)
-                    .font(.system(size: 32, weight: .bold))
-                if !albums.isEmpty {
-                    Text("\(albums.count) album\(albums.count == 1 ? "" : "s")")
-                        .font(.footnote)
+    /// Centered circular avatar + name + count + play grid — consistent with the album/playlist/Liked
+    /// Songs detail layout (just round instead of square), rather than the old full-bleed banner.
+    private var header: some View {
+        VStack(spacing: 0) {
+            LibraryImage(url: client.artworkURL(for: artist, size: 600), maxPixel: 600) {
+                Color(.systemGray5).overlay {
+                    Image(systemName: "music.mic")
+                        .font(.system(size: 52, weight: .light))
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, DS.hPad)
-            .padding(.bottom, 20)
+            .frame(width: 200, height: 200)
+            .clipShape(Circle())
+            .artworkShadow()
+
+            Text(artist.name)
+                .font(.title2).fontWeight(.bold)
+                .multilineTextAlignment(.center)
+                .padding(.top, 18)
+                .padding(.horizontal, DS.hPad)
+            if !albums.isEmpty {
+                Text("\(albums.count) album\(albums.count == 1 ? "" : "s")")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+
+                playRow
+                    .padding(.horizontal, DS.hPad)
+                    .padding(.top, 18)
+            }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 12)
     }
 }

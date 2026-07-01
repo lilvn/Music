@@ -42,6 +42,7 @@ struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showQueue = false
     @State private var showLyrics = false
+    @State private var addRequest: PlaylistAddRequest?
 
     /// Ask RootTabView to push the route. It pushes BEHIND the player and then closes it, so the detail
     /// is already on screen when the player dismisses — no flash of the Home root in between.
@@ -121,6 +122,7 @@ struct NowPlayingView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(item: $addRequest) { PlaylistPickerSheet(request: $0) }
     }
 
     private var grabber: some View {
@@ -169,19 +171,17 @@ struct NowPlayingView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            // 3D-touch (long-press) the title/artist for Go to Album / Artist. A custom preview keeps the
-            // lifted platter clean (the default snapshot of the full-width, truncated title clipped oddly).
+            // 3D-touch (long-press) the title/artist for Go to Album / Artist.
             .contextMenu {
                 Button { navigate(.album(albumItem)) } label: { Label("Go to Album", systemImage: "square.stack") }
                 if let artistRoute {
                     Button { navigate(artistRoute) } label: { Label("Go to Artist", systemImage: "music.mic") }
                 }
-            } preview: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(player.currentItem?.name ?? "").font(.headline)
-                    Text(player.currentItem?.primaryArtist ?? "").font(.subheadline).foregroundStyle(.secondary)
+                if let id = player.currentItem?.id {
+                    Button { addRequest = PlaylistAddRequest(itemIds: [id]) } label: {
+                        Label("Add to Playlist", systemImage: "text.badge.plus")
+                    }
                 }
-                .padding(20)
             }
 
             addButton

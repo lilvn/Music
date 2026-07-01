@@ -52,6 +52,8 @@ struct PlaylistsView: View {
             }
             .scrollIndicators(.hidden)
             .scrollEdgeEffectStyle(.soft, for: .top)
+            // Pull down to re-sync with Jellyfin (main page only — not inside pushed details/sheets).
+            .refreshable { await client.refreshFavorites(); await load(); AudioStore.shared.refreshPinnedLibrary() }
             // Title lives in the scroll content (Home-style), so no header pins while scrolling.
             .toolbar(.hidden, for: .navigationBar)
             .alert("New Playlist", isPresented: $showCreate) {
@@ -83,11 +85,25 @@ struct PlaylistsView: View {
         let name = newName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
         Task {
-            _ = try? await client.createPlaylist(name: name)
+            if let id = try? await client.createPlaylist(name: name) {
+                await uploadDefaultPlaylistCover(for: id, using: client)
+            }
             await load()
         }
     }
 
+}
+
+/// Renders our coverless-playlist placeholder to a JPEG and sets it as the playlist's primary image on
+/// Jellyfin, so a brand-new playlist shows our default art everywhere (app + server + other clients)
+/// instead of Jellyfin's generic one.
+@MainActor
+func uploadDefaultPlaylistCover(for playlistId: String, using client: JellyfinClient) async {
+    guard !playlistId.isEmpty else { return }
+    let renderer = ImageRenderer(content: ArtworkPlaceholder().frame(width: 600, height: 600))
+    renderer.scale = 1
+    guard let data = renderer.uiImage?.jpegData(compressionQuality: 0.9) else { return }
+    try? await client.uploadPrimaryImage(itemId: playlistId, jpeg: data)
 }
 
 extension Notification.Name {
@@ -513,7 +529,9 @@ struct PlaylistPickerSheet: View {
         let name = newName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
         Task {
-            _ = try? await client.createPlaylist(name: name, itemIds: request.itemIds)
+            if let id = try? await client.createPlaylist(name: name, itemIds: request.itemIds) {
+                await uploadDefaultPlaylistCover(for: id, using: client)
+            }
             dismiss()
         }
     }

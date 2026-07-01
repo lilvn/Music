@@ -40,7 +40,8 @@ final class Player {
     var audioLevel: Double = 0
 
     /// Autoplay: when the queue runs out, keep playing a server-generated instant mix of similar songs.
-    var autoplayEnabled = true
+    /// Off by default — opt in via the toggle in Up Next.
+    var autoplayEnabled = false
     /// Upcoming Autoplay songs (an instant mix) — shown under the Up Next list, played when the queue ends.
     var autoplayTracks: [MediaItem] = []
 
@@ -115,7 +116,7 @@ final class Player {
         setupNotifications()
         updateOutputRoute()
         audioMonitor.onLevel = { [weak self] in self?.audioLevel = $0 }
-        autoplayEnabled = UserDefaults.standard.object(forKey: autoplayDefaultsKey) as? Bool ?? true
+        autoplayEnabled = UserDefaults.standard.object(forKey: autoplayDefaultsKey) as? Bool ?? false
         loadRecentPlays(for: client.userId)
         restoreSession()   // show the last-played track in the mini bar (paused, ready to resume)
     }
@@ -581,7 +582,10 @@ final class Player {
     }
 
     private func makeItem(forIndex i: Int, immediate: Bool) -> AVPlayerItem? {
-        guard queue.items.indices.contains(i), let url = client.streamURL(for: queue.items[i]) else { return nil }
+        guard queue.items.indices.contains(i) else { return nil }
+        let track = queue.items[i]
+        // Prefer a downloaded/cached local file so playback survives a network drop; else stream.
+        guard let url = AudioStore.shared.localURL(for: track.id) ?? client.streamURL(for: track) else { return nil }
         let item = AVPlayerItem(url: url)
         // The immediate item starts fast on a low buffer; lookahead items keep the default
         // (automatic) buffering so they're pre-rolled and ready for a gapless hand-off.
@@ -630,7 +634,19 @@ final class Player {
         updateNowPlayingInfo()
         saveSession()
         prefetchArtwork()
+        prefetchUpcomingAudio()
         audioMonitor.start()
+    }
+
+    /// Hand the next few queue tracks to the offline store to pre-buffer (Wi-Fi only), so a network
+    /// drop mid-queue doesn't interrupt playback.
+    private func prefetchUpcomingAudio() {
+        let i = queue.currentIndex
+        let upcoming = (1...4).compactMap { off -> MediaItem? in
+            let j = i + off
+            return queue.items.indices.contains(j) ? queue.items[j] : nil
+        }
+        if !upcoming.isEmpty { AudioStore.shared.prefetchUpcoming(upcoming) }
     }
 
     /// Make sure the next track is pre-rolled into the queue for a gapless hand-off.
@@ -790,6 +806,7 @@ final class Player {
         ensureLookahead()                      // pre-roll the following track
         saveSession()
         prefetchArtwork()
+        prefetchUpcomingAudio()                // keep the rolling offline buffer ahead of playback
     }
 
     private func handleQueueEnd() {
@@ -953,13 +970,18 @@ final class Player {
         guard let info = note.userInfo,
               let raw = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return }
-        // Headphones / Bluetooth disconnected → pause, matching system music behaviour.
-        if reason == .oldDeviceUnavailable, isPlaying {
-            player?.pause()
-            isPlaying = false
-            intendedPlaying = false
-            updateNowPlayingRate()
-        }
+        // A wired/Bluetooth output being unplugged makes iOS fall back to the built-in speaker — pause
+        // then, like the system Music app, so audio doesn't suddenly blast from the phone. But selecting
+        // AirPlay (or any deliberate external route) ALSO fires `.oldDeviceUnavailable` as the old route
+        // drops; there the new route isn't the speaker, so we must keep playing (don't pause on AirPlay).
+        guard reason == .oldDeviceUnavailable, isPlaying else { return }
+        let fellBackToSpeaker = AVAudioSession.sharedInstance().currentRoute.outputs
+            .contains { $0.portType == .builtInSpeaker }
+        guard fellBackToSpeaker else { return }
+        player?.pause()
+        isPlaying = false
+        intendedPlaying = false
+        updateNowPlayingRate()
     }
 #endif
 

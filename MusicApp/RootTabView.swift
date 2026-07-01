@@ -96,7 +96,7 @@ private struct MiniBarClearance: ViewModifier {
     func body(content: Content) -> some View {
         content.safeAreaInset(edge: .bottom, spacing: 0) {
             if player.currentItem != nil {
-                Color.clear.frame(height: 64)
+                Color.clear.frame(height: 80)   // mini-bar height + a breathing gap so the last row doesn't kiss it
             }
         }
     }

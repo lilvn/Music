@@ -38,6 +38,8 @@ struct AlbumsView: View {
             }
             .scrollIndicators(.hidden)
             .scrollEdgeEffectStyle(.soft, for: .top)
+            // Pull down to re-sync albums with Jellyfin (main page only).
+            .refreshable { await load() }
             // Title lives in the scroll content (Home-style), so no header pins while scrolling.
             .toolbar(.hidden, for: .navigationBar)
             .task { if albums.isEmpty { await load() } }

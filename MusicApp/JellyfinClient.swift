@@ -18,6 +18,11 @@ final class JellyfinClient {
     /// Ids of the user's favourite (liked) songs — drives the Now Playing heart + Liked Songs.
     var favoriteIds: Set<String> = []
 
+    /// Ids in the order they were liked, most-recent FIRST. Tracked locally per user because Jellyfin
+    /// has no "date favourited" sort (its DateCreated is the library-add date, not the like time) —
+    /// this is what puts a newly-liked song at the TOP of Liked Songs.
+    private(set) var likedOrder: [String] = []
+
     // Caches for IMMUTABLE content, so re-opening an album or the lyrics sheet is instant (no refetch).
     // MainActor-isolated (the whole client is), so plain dictionaries are safe here.
     @ObservationIgnored private var albumTrackCache: [String: [MediaItem]] = [:]
@@ -35,6 +40,7 @@ final class JellyfinClient {
         accessToken = d.string(forKey: Keys.token) ?? ""
         userId      = d.string(forKey: Keys.userId) ?? ""
         username    = d.string(forKey: Keys.username) ?? ""
+        likedOrder  = d.stringArray(forKey: Self.likedOrderKey(userId)) ?? []
     }
 
     private var baseURL: URL? { URL(string: serverURL) }
@@ -69,6 +75,7 @@ final class JellyfinClient {
         accessToken = auth.accessToken
         userId = auth.user.id
         self.username = auth.user.name
+        likedOrder = UserDefaults.standard.stringArray(forKey: Self.likedOrderKey(userId)) ?? []
 
         let d = UserDefaults.standard
         d.set(serverURL, forKey: Keys.server)
@@ -78,7 +85,7 @@ final class JellyfinClient {
     }
 
     func signOut() {
-        serverURL = ""; accessToken = ""; userId = ""; username = ""; favoriteIds = []
+        serverURL = ""; accessToken = ""; userId = ""; username = ""; favoriteIds = []; likedOrder = []
         let d = UserDefaults.standard
         [Keys.server, Keys.token, Keys.userId, Keys.username].forEach { d.removeObject(forKey: $0) }
     }
@@ -352,16 +359,46 @@ final class JellyfinClient {
         guard isAuthenticated else { return }
         let songs = (try? await fetchFavoriteSongs()) ?? []
         favoriteIds = Set(songs.map(\.id))
+        reconcileLikedOrder(with: songs.map(\.id))   // keep the local like-order in sync on every refresh
     }
 
     func isFavorite(_ itemId: String) -> Bool { favoriteIds.contains(itemId) }
 
-    /// Toggle an item's favourite state (optimistic local update + server mutation).
+    /// Toggle an item's favourite state (optimistic local update + server mutation). Liking moves the
+    /// id to the FRONT of `likedOrder` so it shows at the top of Liked Songs; unliking drops it.
     func setFavorite(_ itemId: String, _ favorite: Bool) async {
-        if favorite { favoriteIds.insert(itemId) } else { favoriteIds.remove(itemId) }
+        if favorite {
+            favoriteIds.insert(itemId)
+            likedOrder.removeAll { $0 == itemId }
+            likedOrder.insert(itemId, at: 0)
+        } else {
+            favoriteIds.remove(itemId)
+            likedOrder.removeAll { $0 == itemId }
+        }
+        saveLikedOrder()
         try? await sendMutation("Users/\(userId)/FavoriteItems/\(itemId)",
                                 method: favorite ? "POST" : "DELETE", query: [])
     }
+
+    /// Position of each liked id (0 = most-recently liked) — used to sort Liked Songs.
+    var likeRank: [String: Int] {
+        var d = [String: Int](minimumCapacity: likedOrder.count)
+        for (i, id) in likedOrder.enumerated() { d[id] = i }
+        return d
+    }
+
+    /// Reconcile local like-order with the server's current favourites: drop ids no longer favourited,
+    /// and append any favourited elsewhere (unknown like-time → they sort after locally-liked ones).
+    func reconcileLikedOrder(with currentIds: [String]) {
+        let set = Set(currentIds)
+        likedOrder.removeAll { !set.contains($0) }
+        let known = Set(likedOrder)
+        likedOrder.append(contentsOf: currentIds.filter { !known.contains($0) })
+        saveLikedOrder()
+    }
+
+    private func saveLikedOrder() { UserDefaults.standard.set(likedOrder, forKey: Self.likedOrderKey(userId)) }
+    private static func likedOrderKey(_ uid: String) -> String { "jf.likedOrder.\(uid)" }
 
     /// Set an item's primary (cover) image — Jellyfin wants the bytes base64-encoded in the body.
     func uploadPrimaryImage(itemId: String, jpeg: Data) async throws {

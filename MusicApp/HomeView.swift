@@ -23,7 +23,7 @@ struct HomeView: View {
                                        topInset: geo.safeAreaInsets.top)
 
                         if !recentlyAdded.isEmpty {
-                            FeaturedShelf(title: "Recently Added", albums: recentlyAdded)
+                            FeaturedShelf(title: "New Releases", albums: recentlyAdded)
                         }
                         if !player.recentManualPlays.isEmpty {
                             RecentlyPlayedShelf(plays: player.recentManualPlays)
@@ -48,6 +48,8 @@ struct HomeView: View {
                 }
                 .scrollIndicators(.hidden)
                 .scrollEdgeEffectStyle(.soft, for: .top)
+                // Pull down to re-sync the home shelves with Jellyfin (main page only).
+                .refreshable { await load(force: true); AudioStore.shared.refreshPinnedLibrary() }
                 .ignoresSafeArea(edges: .top)
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -56,8 +58,8 @@ struct HomeView: View {
         }
     }
 
-    private func load() async {
-        guard !loaded else { return }
+    private func load(force: Bool = false) async {
+        guard force || !loaded else { return }
         async let recent = client.fetchRecentlyAdded(limit: 14)
         async let feat = client.fetchFeatured(limit: 8)
         async let most = client.fetchMostPlayed(limit: 16)

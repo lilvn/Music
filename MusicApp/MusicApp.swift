@@ -51,12 +51,19 @@ struct MusicApp: App {
             }
             .environment(client)
             .environment(player)
+            .environment(AudioStore.shared)
             .tint(.primary)
+            // Wire the offline store to the client and start keeping the library downloaded (Wi-Fi only).
+            .task {
+                AudioStore.shared.attach(client)
+                if client.isAuthenticated { AudioStore.shared.refreshPinnedLibrary() }
+            }
             // The signed-in Jellyfin user changed (login / switch / sign-out): re-point per-user state
             // — Recently Played history and Liked Songs both belong to that specific account.
             .onChange(of: client.userId) { _, newUserId in
                 player.userDidChange(to: newUserId)
                 Task { await client.refreshFavorites() }
+                AudioStore.shared.refreshPinnedLibrary()
             }
         }
     }
