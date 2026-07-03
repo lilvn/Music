@@ -27,21 +27,24 @@ struct TVNowPlayingView: View {
             }
 
             if player.currentItem != nil || inVideoMode {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 0)
-
+                Group {
                     if !inVideoMode {
-                        // ----- Centered: the carousel (names under the covers) with the playhead below -----
-                        TVQueueCarousel(coverSize: 340, showReflection: true)
-                        progressBar
-                            .padding(.top, 8)
-                        Spacer(minLength: 0)
-                    } else if !videoCtl.direct {
-                        // ----- Matched-video mode: the carousel docks to the bottom over the video -----
-                        TVQueueCarousel(coverSize: 150, showReflection: false)
-                        Color.clear.frame(height: 8)
+                        // ----- The skeuomorphic centrepiece: cover + CD + reflection, playhead below -----
+                        VStack(spacing: 8) {
+                            TVNowPlayingArtwork(coverSize: 400)
+                            progressBar
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .transition(.opacity)
+                    } else {
+                        // ----- Video mode: the artwork shrinks into a bottom-left "channel bug" -----
+                        videoCornerBug
+                            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                   alignment: .bottomLeading)
+                            .padding(.leading, 70)
+                            .padding(.bottom, 60)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    // Direct video playback (the Music Videos playlist): clean fullscreen, no dock.
                 }
                 .animation(.spring(response: 0.6, dampingFraction: 0.85), value: inVideoMode)
             } else if let remote = SessionHub.shared.remote {
@@ -63,15 +66,22 @@ struct TVNowPlayingView: View {
         .onPlayPauseCommand {
             inVideoMode ? videoCtl.togglePlayPause() : player.togglePlayPause()
         }
-        // Direct video playback: with the carousel hidden, the screen itself takes focus so trackpad
-        // swipes skip between videos in the playlist.
-        .focusable(videoCtl.direct)
+        // Video mode: the screen itself takes focus so trackpad swipes skip — between playlist videos
+        // (direct) or between queue tracks (matched).
+        .focusable(inVideoMode)
         .onMoveCommand { direction in
-            guard videoCtl.direct else { return }
+            guard inVideoMode else { return }
+            let delta: Int
             switch direction {
-            case .left:  videoCtl.skipDirect(-1, client: client, audio: player)
-            case .right: videoCtl.skipDirect(+1, client: client, audio: player)
-            default: break
+            case .left: delta = -1
+            case .right: delta = +1
+            default: return
+            }
+            if videoCtl.direct {
+                videoCtl.skipDirect(delta, client: client, audio: player)
+            } else {
+                let next = player.queue.currentIndex + delta
+                if player.queue.items.indices.contains(next) { player.play(at: next) }
             }
         }
         .task {
@@ -102,6 +112,54 @@ struct TVNowPlayingView: View {
             videoCtl.enter(video: video, client: client, audio: player)
         } else {
             videoCtl.exit(audio: player, resumeAudio: true)
+        }
+    }
+
+    // MARK: - Video "channel bug" (bottom-left, old-school music-video-channel style)
+
+    /// The item whose info the bug shows: the song (matched mode) or the video itself (direct mode).
+    private var bugItem: MediaItem? {
+        videoCtl.direct ? videoCtl.activeVideo : player.currentItem
+    }
+
+    /// Small cover + CD in the corner over a black gradient panel, with track / artist / album to the
+    /// right — the way skeuomorphic music-video channels captioned what was on.
+    private var videoCornerBug: some View {
+        HStack(spacing: 28) {
+            if let bugItem {
+                TVFlowCover(item: bugItem, size: 150,
+                            discOut: true, spinning: true, showReflection: false)
+                    .padding(.trailing, 26)   // room for the slid-out disc
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(bugItem.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(bugItem.primaryArtist)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    if let album = bugItem.album, !album.isEmpty {
+                        Text(album)
+                            .font(.callout)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 24)
+        .padding(.leading, 24)
+        .padding(.trailing, 44)
+        .background {
+            // Black gradient panel fading to the right, like an old channel lower-third.
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(LinearGradient(colors: [.black.opacity(0.88), .black.opacity(0.30)],
+                                     startPoint: .leading, endPoint: .trailing))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(.white.opacity(0.12), lineWidth: 0.5)
+                )
         }
     }
 

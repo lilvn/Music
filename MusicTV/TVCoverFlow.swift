@@ -194,71 +194,62 @@ struct TVFlowCover: View {
 ///
 /// No per-cover Buttons: positions derive from each item's distance to the current index, so the
 /// carousel is a pure function of the queue — nothing for the focus engine to decorate.
-struct TVQueueCarousel: View {
+struct TVNowPlayingArtwork: View {
     @Environment(Player.self) private var player
     let coverSize: CGFloat
-    var showReflection = true
     @FocusState private var focused: Bool
 
     // ---- Track-change choreography -------------------------------------------------------------
-    // Every transition plays the same three beats: the CD tucks back INTO the cover, the flow slides
-    // to the new centre, and only then does the new centre's CD pop out and start spinning.
-    /// Whether the centre CD is out. Never flip this directly mid-transition — the worker owns it.
+    // Every transition plays the same three beats: the CD tucks back INTO the cover, the artwork
+    // swaps to the new track, and only then does the new CD pop out and start spinning.
+    /// Whether the CD is out. Never flip this directly mid-transition — the worker owns it.
     @State private var discOut = true
     /// The single running choreography worker (swipe or auto-advance); nil when settled.
     @State private var transition: Task<Void, Never>?
     /// Where the user is heading. Updated by every swipe; drained by the worker one step at a time,
-    /// so queued-up swipes play out as sequential slides instead of being lost.
+    /// so queued-up swipes play out sequentially instead of being lost.
     @State private var targetIndex: Int?
 
-    /// The song is in its final second — begin tucking the CD in now, so the flow is ready to move
-    /// the instant the track actually changes and the next CD pops out as the next song starts.
+    /// The song is in its final second — begin tucking the CD in now, so the artwork is ready to swap
+    /// the instant the track changes and the next CD pops out as the next song starts.
     private var nearEnd: Bool {
         player.isPlaying && player.duration > 1 && player.duration - player.currentTime < 1.0
     }
 
     var body: some View {
-        let items = player.queue.items
-        let current = player.queue.currentIndex
-
-        ZStack {
-            ForEach(visibleRange(count: items.count, current: current), id: \.self) { i in
-                let rel = i - current
-                TVFlowCover(item: items[i],
+        Group {
+            if let item = player.currentItem {
+                TVFlowCover(item: item,
                             size: coverSize,
-                            discOut: rel == 0 && discOut && !nearEnd,
-                            spinning: rel == 0 && player.isPlaying,
-                            showReflection: showReflection,
-                            emphasized: rel == 0)
-                    .scaleEffect(rel == 0 ? 1 : 0.74)
-                    .rotation3DEffect(.degrees(rel == 0 ? 0 : (rel < 0 ? 44 : -44)),
-                                      axis: (x: 0, y: 1, z: 0),
-                                      anchor: .center, perspective: 0.45)
-                    .offset(x: xOffset(rel))
-                    .brightness(rel == 0 ? 0 : -0.07)     // side covers recede, centre reads as "selected"
-                    .opacity(abs(rel) >= 2 ? 0 : 1)       // ONLY prev / current / next are visible
-                    .zIndex(Double(50 - abs(rel)))        // centre above its neighbours
+                            discOut: discOut && !nearEnd,
+                            spinning: player.isPlaying,
+                            showReflection: true,
+                            emphasized: true)
+                    // Unique per queue-slot (the same song can sit in the queue twice) so a track
+                    // change swaps the view and the transition below runs.
+                    .id("\(player.queue.currentIndex)-\(item.id)")
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
         }
+        .animation(.easeInOut(duration: 0.32), value: player.queue.currentIndex)
         .frame(maxWidth: .infinity)
-        .frame(height: coverSize * (showReflection ? 1.34 : 1.06))
         .contentShape(Rectangle())
         .focusable()
         .focused($focused)
-        .scaleEffect(focused ? 1.02 : 1.0)   // the whole flow breathes subtly when the remote is on it
+        .scaleEffect(focused ? 1.02 : 1.0)   // breathes subtly when the remote is on it
         .onMoveCommand { direction in
             switch direction {
-            case .left:  step(-1, count: items.count)
-            case .right: step(+1, count: items.count)
+            case .left:  step(-1)
+            case .right: step(+1)
             case .up, .down:
                 focused = false   // hand focus back to the rest of the screen (tab bar)
             default:
                 break
             }
         }
-        .onTapGesture { player.togglePlayPause() }   // remote click on the flow = play/pause
+        .onTapGesture { player.togglePlayPause() }   // remote click = play/pause
         // The track changed underneath us (natural end, remote command, another device): the retract
-        // already happened via `nearEnd` — commit it and pop the new CD once the slide settles.
+        // already happened via `nearEnd` — commit it and pop the new CD once the swap settles.
         .onChange(of: player.queue.currentIndex) { _, _ in
             startWorker(preRetracted: true)
         }
@@ -267,54 +258,38 @@ struct TVQueueCarousel: View {
             targetIndex = nil
             discOut = true
         }
-        .animation(.spring(response: 0.55, dampingFraction: 0.78), value: current)
         .animation(.easeOut(duration: 0.2), value: focused)
     }
 
     // MARK: Choreography
 
     /// A trackpad swipe: head one step left/right from wherever we're already heading.
-    private func step(_ delta: Int, count: Int) {
+    private func step(_ delta: Int) {
         let base = targetIndex ?? player.queue.currentIndex
         let next = base + delta
-        guard (0..<count).contains(next) else { return }
+        guard (0..<player.queue.items.count).contains(next) else { return }
         targetIndex = next
         startWorker(preRetracted: false)
     }
 
-    /// The one transition worker. Beats: tuck the CD in → slide (draining any queued swipe targets,
-    /// one spring per step) → pop the CD back out. A second call while running is a no-op — the
+    /// The one transition worker. Beats: tuck the CD in → swap the artwork (draining any queued swipe
+    /// targets one at a time) → pop the CD back out. A second call while running is a no-op — the
     /// running worker picks up the new `targetIndex` in its drain loop.
     private func startWorker(preRetracted: Bool) {
         guard transition == nil else { return }
         transition = Task {
             discOut = false
-            // Swipes wait for the tuck-in to read before the flow moves; for a natural end the tuck
-            // already played during the song's final second and the slide is underway — just give it
-            // time to settle so the pop lands right as the new song starts.
-            try? await Task.sleep(for: .milliseconds(preRetracted ? 420 : 280))
+            // Swipes wait for the tuck-in to read before the swap; for a natural end the tuck already
+            // played during the song's final second — just let the swap settle so the pop lands right
+            // as the new song starts.
+            try? await Task.sleep(for: .milliseconds(preRetracted ? 380 : 280))
             while !Task.isCancelled, let t = targetIndex {
                 targetIndex = nil
                 if t != player.queue.currentIndex { player.play(at: t) }
-                try? await Task.sleep(for: .milliseconds(460))
+                try? await Task.sleep(for: .milliseconds(400))
             }
             if !Task.isCancelled { discOut = true }
             transition = nil
         }
-    }
-
-    /// Lay out current ± 2: prev/current/next are visible, the ±2 covers ride along invisibly so a
-    /// slide has an incoming cover to animate in from the wings instead of popping.
-    private func visibleRange(count: Int, current: Int) -> Range<Int> {
-        guard count > 0 else { return 0..<0 }
-        return max(0, current - 2)..<min(count, current + 3)
-    }
-
-    /// Classic cover-flow spacing: a clear gap to the first neighbour, then a tight overlapped stack.
-    private func xOffset(_ rel: Int) -> CGFloat {
-        guard rel != 0 else { return 0 }
-        let first = coverSize * 0.74
-        let step = coverSize * 0.30
-        return CGFloat(rel.signum()) * (first + CGFloat(abs(rel) - 1) * step)
     }
 }
