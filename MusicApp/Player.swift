@@ -90,6 +90,10 @@ final class Player {
 
     /// Whether the user intends playback to be running (so a freshly-loaded item auto-plays).
     @ObservationIgnored private var intendedPlaying = false
+    /// Whether playback is MEANT to be running (true from a play action even while the item is still
+    /// loading, false for a restored-paused session). Lets the TV's video mode distinguish "the user
+    /// started something" from "a track merely exists" — isPlaying alone lags during load.
+    var wantsPlayback: Bool { intendedPlaying }
     /// Time-observer updates are ignored until this instant (set briefly after a manual seek).
     @ObservationIgnored private var seekSuppressUntil = Date.distantPast
     /// The item id currently reported to Jellyfin as "playing", + a counter to throttle progress.

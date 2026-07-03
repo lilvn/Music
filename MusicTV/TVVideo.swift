@@ -36,17 +36,19 @@ final class TVVideoController {
         loaded = true
     }
 
-    /// The library video for this song, if any.
+    /// The library video for this song, if any. EXACT matches only (video name == the song's artist
+    /// or title, or properly-tagged video artist) — the old "contains" rules false-matched wide
+    /// (a video named "Che" hit every artist containing those letters) and launched random videos.
     func videoMatching(_ song: MediaItem?) -> MediaItem? {
         guard let song else { return nil }
-        let artist = song.primaryArtist.lowercased()
-        let title = song.name.lowercased()
+        let artist = song.primaryArtist.trimmingCharacters(in: .whitespaces).lowercased()
+        let title = song.name.trimmingCharacters(in: .whitespaces).lowercased()
         return videos.first { video in
-            let name = video.name.lowercased()
+            let name = video.name.trimmingCharacters(in: .whitespaces).lowercased()
             guard !name.isEmpty else { return false }
-            if !artist.isEmpty, name == artist || name.contains(artist) || artist.contains(name) { return true }
+            if !artist.isEmpty, name == artist { return true }
             if name == title { return true }
-            return video.artistItems?.contains { $0.name.lowercased() == artist } ?? false
+            return video.artistItems?.contains { $0.name.trimmingCharacters(in: .whitespaces).lowercased() == artist } ?? false
         }
     }
 
@@ -60,6 +62,9 @@ final class TVVideoController {
             return
         }
         if let video = videoMatching(song) {
+            // Only take over when playback was actually STARTED (or we're already mid-video-channel):
+            // a matched track merely sitting restored-and-paused must not autoplay its video.
+            guard audio.wantsPlayback || audio.isPlaying || activeVideo != nil else { return }
             enter(video: video, client: client, audio: audio)
         } else if activeVideo != nil {
             exit(audio: audio, resumeAudio: true)        // left video territory → audio takes over
