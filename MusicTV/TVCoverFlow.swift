@@ -202,50 +202,36 @@ struct TVNowPlayingBug: View {
     var albumLine: String? = nil
     var spinning = true
 
-    private let cover: CGFloat = 128
+    private let cover: CGFloat = 104
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // The whole bottom is a black gradient fading UP to clear, covering content behind (a grid,
-            // or a playing video) and fading out around the title. Centre-aligned + full width so it
-            // bleeds EVENLY to both physical screen edges AND the bottom; leading-alignment pinned the
-            // left edge to the overscan inset, and a background anchored it to the inset bottom (floated).
-            LinearGradient(colors: [.black, .black.opacity(0.9), .clear],
-                           startPoint: .bottom, endPoint: .top)
-                .frame(height: 340)
-                .frame(maxWidth: .infinity)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-
-            // Reflective cover + CD (left, with the playhead under it) and track text.
-            HStack(alignment: .top, spacing: 34) {
-                VStack(spacing: 12) {
-                    // The mini bar carries its own text, so hide the cover's built-in label.
-                    TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
-                                showReflection: true, showLabel: false)
-                    // Track length bar, always under the artwork.
-                    TVMiniProgress().frame(width: cover)
-                }
-                .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.name)
-                        .font(.caption).fontWeight(.semibold)
-                        .lineLimit(1)
-                    if let artistLine, !artistLine.isEmpty {
-                        Text(artistLine).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    if let albumLine, !albumLine.isEmpty {
-                        Text(albumLine).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-                    }
-                }
-                .padding(.top, 8)
+        // A compact Liquid Glass shelf: cover + CD + playhead on the left, track text on the right.
+        HStack(alignment: .top, spacing: 26) {
+            VStack(spacing: 10) {
+                // The shelf carries its own text, so hide the cover's built-in label.
+                TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
+                            showReflection: false, showLabel: false)
+                // Track length bar, always under the artwork.
+                TVMiniProgress().frame(width: cover)
             }
-            .padding(.horizontal, 70)
-            .padding(.bottom, 36)
-            .frame(maxWidth: .infinity, alignment: .leading)   // content stays LEFT; gradient stays centred
+            .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.name)
+                    .font(.caption).fontWeight(.semibold)
+                    .lineLimit(1)
+                if let artistLine, !artistLine.isEmpty {
+                    Text(artistLine).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+                if let albumLine, !albumLine.isEmpty {
+                    Text(albumLine).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                }
+            }
+            .padding(.top, 6)
+            .frame(maxWidth: 320, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .bottom)
+        .padding(22)
+        .glassEffect(.regular, in: .rect(cornerRadius: 28))
     }
 }
 

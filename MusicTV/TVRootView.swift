@@ -30,24 +30,28 @@ struct TVRootView: View {
                 .padding(.trailing, 60)
                 .padding(.top, 20)
         }
-        // The mini bar: a full-width band pinned to the bottom of EVERY page — including Now Playing in
-        // audio mode (the track sits centred above it). Non-focusable visual chrome (the Now Playing
-        // tab is how you open the full page); its gradient covers the bottom of whatever's behind.
-        .overlay(alignment: .bottom) {
+        // The mini bar: a compact Liquid Glass shelf in the bottom-left of EVERY page — including Now
+        // Playing (the full page sits above it). Non-focusable visual chrome (the Now Playing tab is how
+        // you open the full page).
+        .overlay(alignment: .bottomLeading) {
             let videoCtl = TVVideoController.shared
-            if videoCtl.direct, let video = videoCtl.activeVideo {
-                TVNowPlayingBug(item: video, artistLine: video.primaryArtist, spinning: true)
-            } else if let item = player.currentItem {
-                TVNowPlayingBug(item: item,
-                                artistLine: item.primaryArtist,
-                                albumLine: item.album,
-                                spinning: player.isPlaying || videoCtl.activeVideo != nil)
-            } else if let remote = SessionHub.shared.remote {
-                TVNowPlayingBug(item: remote.item,
-                                artistLine: remote.item.primaryArtist,
-                                albumLine: "Playing on \(remote.deviceName)",
-                                spinning: !remote.isPaused)
+            Group {
+                if videoCtl.direct, let video = videoCtl.activeVideo {
+                    TVNowPlayingBug(item: video, artistLine: video.primaryArtist, spinning: true)
+                } else if let item = player.currentItem {
+                    TVNowPlayingBug(item: item,
+                                    artistLine: item.primaryArtist,
+                                    albumLine: item.album,
+                                    spinning: player.isPlaying || videoCtl.activeVideo != nil)
+                } else if let remote = SessionHub.shared.remote {
+                    TVNowPlayingBug(item: remote.item,
+                                    artistLine: remote.item.primaryArtist,
+                                    albumLine: "Playing on \(remote.deviceName)",
+                                    spinning: !remote.isPaused)
+                }
             }
+            .padding(.leading, 60)
+            .padding(.bottom, 50)
         }
     }
 }
