@@ -2,6 +2,14 @@ import SwiftUI
 
 // MARK: - Shared TV building blocks (10-foot UI: big art, focus-driven cards)
 
+/// Corner radii kept in step with the iPhone app (DS.cornerCard = 8, cornerArtwork = 12, cornerThumb =
+/// 6) so covers read the same nearly-square way on TV instead of over-rounded.
+enum TVDS {
+    static let cover: CGFloat = 8      // album / playlist / flow covers
+    static let artwork: CGFloat = 12   // large plain artwork (detail header, remote mirror)
+    static let thumb: CGFloat = 6      // row thumbnails
+}
+
 /// Where a browse card leads. Local to the TV app — the phone's LibraryRoute carries iPhone-only cases.
 enum TVCollection: Hashable {
     case album(MediaItem)
@@ -59,11 +67,12 @@ struct TVCoverCard: View {
                 TVPlaceholder()
             }
             .aspectRatio(1, contentMode: .fill)
+            // Clip BOTH the art and the missing-art placeholder to the same rounded corners, so a
+            // coverless album isn't a square tile among rounded ones.
+            .clipShape(RoundedRectangle(cornerRadius: TVDS.cover, style: .continuous))
         }
         .buttonStyle(.borderless)
-        .overlay(alignment: .bottom) { EmptyView() }
         // Labels live OUTSIDE the button so the focus lift only scales the artwork.
-        .padding(.bottom, 0)
         .accessibilityLabel(item.name)
     }
 }
@@ -107,7 +116,7 @@ struct TVSongRow: View {
                         TVPlaceholder()
                     }
                     .frame(width: 64, height: 64)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: TVDS.thumb, style: .continuous))
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(song.name)

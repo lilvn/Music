@@ -26,27 +26,20 @@ struct TVNowPlayingView: View {
                 TVBackdrop(item: player.currentItem ?? SessionHub.shared.remote?.item)
             }
 
-            if player.currentItem != nil || inVideoMode {
-                Group {
-                    if !inVideoMode {
-                        // ----- The skeuomorphic centrepiece: cover + CD + reflection, playhead below -----
-                        VStack(spacing: 8) {
-                            TVNowPlayingArtwork(coverSize: 400)
-                            progressBar
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .transition(.opacity)
-                    } else {
-                        // ----- Video mode: the artwork shrinks into a bottom-left "channel bug" -----
-                        videoCornerBug
-                            .frame(maxWidth: .infinity, maxHeight: .infinity,
-                                   alignment: .bottomLeading)
-                            .padding(.leading, 70)
-                            .padding(.bottom, 60)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
+            if inVideoMode {
+                // Video fills the screen; the mini-bar band (mounted at the app root) captions it at
+                // the bottom. Nothing else here.
+                Color.clear
+            } else if player.currentItem != nil {
+                // ----- The skeuomorphic centrepiece: cover + CD + reflection, playhead below. Lifted
+                // above the bottom mini-bar band so the track sits in the middle. -----
+                VStack(spacing: 8) {
+                    TVNowPlayingArtwork(coverSize: 400)
+                    progressBar
                 }
-                .animation(.spring(response: 0.6, dampingFraction: 0.85), value: inVideoMode)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.bottom, 220)   // clear the mini-bar band
+                .transition(.opacity)
             } else if let remote = SessionHub.shared.remote {
                 // Another device of this account is playing — mirror it and offer remote control.
                 remoteMirror(remote)
@@ -62,6 +55,7 @@ struct TVNowPlayingView: View {
                 }
             }
         }
+        .toolbar(.hidden, for: .tabBar)   // hide the top tab bar on Now Playing (swipe up to reveal)
         // Siri Remote play/pause drives whichever engine is live.
         .onPlayPauseCommand {
             inVideoMode ? videoCtl.togglePlayPause() : player.togglePlayPause()
@@ -87,25 +81,6 @@ struct TVNowPlayingView: View {
         // NOTE: video mode is owned by the APP ROOT (MusicTVApp evaluates on track/play changes), not
         // this view — so the video keeps playing in the background when you browse other pages. This
         // view only renders the current state; the fullscreen layer reattaches when you come back.
-    }
-
-    // MARK: - Video "channel bug" (bottom-left, old-school music-video-channel style)
-
-    /// The item whose info the bug shows: the song (matched mode) or the video itself (direct mode).
-    private var bugItem: MediaItem? {
-        videoCtl.direct ? videoCtl.activeVideo : player.currentItem
-    }
-
-    /// The shared channel bug, captioned for whatever the video is playing.
-    private var videoCornerBug: some View {
-        Group {
-            if let bugItem {
-                TVNowPlayingBug(item: bugItem,
-                                artistLine: bugItem.primaryArtist,
-                                albumLine: bugItem.album,
-                                spinning: true)
-            }
-        }
     }
 
     // MARK: - Chrome (minimal liquid glass)
@@ -135,7 +110,7 @@ struct TVNowPlayingView: View {
                 TVPlaceholder()
             }
             .frame(width: 480, height: 480)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: TVDS.artwork, style: .continuous))
             .shadow(color: .black.opacity(0.5), radius: 30, y: 14)
 
             VStack(alignment: .leading, spacing: 28) {

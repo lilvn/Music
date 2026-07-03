@@ -123,6 +123,9 @@ struct TVFlowCover: View {
 
     /// Center cover gets title + artist; side covers a dimmer title — like the iPhone shelf's labels.
     var emphasized = false
+    /// The mini bar reuses the reflective cover but supplies its OWN text alongside — so it hides this
+    /// built-in label to avoid printing the track name twice.
+    var showLabel = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -142,6 +145,7 @@ struct TVFlowCover: View {
                         .allowsHitTesting(false)
 
                     // Track name floats over the reflection, following the cover's slide.
+                    if showLabel {
                     VStack(spacing: 3) {
                         Text(item.name)
                             .font(emphasized ? .headline : .caption)
@@ -159,6 +163,7 @@ struct TVFlowCover: View {
                     .padding(.top, 14)
                     .offset(x: discOut ? -size * 0.1 : 0)
                     .animation(.spring(response: 0.42, dampingFraction: 0.72), value: discOut)
+                    }
                 }
             }
         }
@@ -169,16 +174,16 @@ struct TVFlowCover: View {
         LibraryImage(url: client.artworkURL(for: item, size: 600), maxPixel: 600) { TVPlaceholder() }
             .aspectRatio(1, contentMode: .fill)
             .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: TVDS.cover, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: TVDS.cover, style: .continuous)
                     .stroke(.white.opacity(0.14), lineWidth: 0.5)
             )
             .overlay(alignment: .top) {
                 // Glass-catch light along the top edge — same as the phone's covers.
                 LinearGradient(colors: [.white.opacity(0.28), .clear],
                                startPoint: .top, endPoint: .center)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: TVDS.cover, style: .continuous))
                     .allowsHitTesting(false)
             }
             .shadow(color: .black.opacity(0.35), radius: 18, y: 10)
@@ -187,42 +192,52 @@ struct TVFlowCover: View {
 
 // MARK: - Corner "channel bug" (the TV's mini bar)
 
-/// Small cover + slid-out CD over a black gradient lower-third panel with text to the right — the
-/// skeuomorphic music-channel caption look. Doubles as the app-wide mini bar (bottom-left of every
-/// page) and the caption over playing music videos.
+/// The TV's mini bar: a full-width band pinned to the bottom of every page. A black gradient fills the
+/// whole bottom and fades UP to transparent around the track title, so whatever's behind (a grid, or a
+/// playing music video) is covered at the bottom and clean above. On the left, the skeuomorphic
+/// reflective cover + slid-out spinning CD; to its right, the track title / artist / album.
 struct TVNowPlayingBug: View {
     let item: MediaItem
     var artistLine: String? = nil
     var albumLine: String? = nil
     var spinning = true
 
-    var body: some View {
-        HStack(spacing: 28) {
-            TVFlowCover(item: item, size: 150,
-                        discOut: true, spinning: spinning, showReflection: false)
-                .padding(.trailing, 26)   // room for the slid-out disc
+    private let cover: CGFloat = 128
 
-            VStack(alignment: .leading, spacing: 5) {
-                Text(item.name)
-                    .font(.headline)
-                    .lineLimit(1)
-                if let artistLine, !artistLine.isEmpty {
-                    Text(artistLine)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            // The whole bottom is a black gradient fading UP to clear, so it covers content at the
+            // bottom (a grid, or a playing video) and fades out around the track title.
+            LinearGradient(colors: [.black, .black.opacity(0.9), .clear],
+                           startPoint: .bottom, endPoint: .top)
+                .frame(height: 340)
+                .frame(maxWidth: .infinity)
+                .allowsHitTesting(false)
+
+            // Reflective cover + CD (left) and track text, pinned to the bottom.
+            HStack(alignment: .top, spacing: 34) {
+                // The mini bar carries its own text, so hide the cover's built-in label.
+                TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
+                            showReflection: true, showLabel: false)
+                    .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(item.name)
+                        .font(.title3).fontWeight(.semibold)
                         .lineLimit(1)
+                    if let artistLine, !artistLine.isEmpty {
+                        Text(artistLine).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    if let albumLine, !albumLine.isEmpty {
+                        Text(albumLine).font(.callout).foregroundStyle(.tertiary).lineLimit(1)
+                    }
                 }
-                if let albumLine, !albumLine.isEmpty {
-                    Text(albumLine)
-                        .font(.callout)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
+                .padding(.top, 6)
             }
-            // No panel behind the bug — just a soft text shadow so the caption stays readable
-            // over a bright video frame.
-            .shadow(color: .black.opacity(0.7), radius: 6, y: 2)
+            .padding(.horizontal, 70)
+            .padding(.bottom, 36)
         }
+        .frame(maxWidth: .infinity, alignment: .bottom)
     }
 }
 

@@ -23,41 +23,23 @@ struct TVRootView: View {
                 .padding(.trailing, 60)
                 .padding(.top, 20)
         }
-        // The channel bug IS the TV's mini bar: bottom-left on every page (Now Playing draws its own),
-        // clicking it opens Now Playing. Mirrors another device's session when nothing plays here.
-        .overlay(alignment: .bottomLeading) {
-            if tab != .nowPlaying {
-                Group {
-                    if TVVideoController.shared.direct, let video = TVVideoController.shared.activeVideo {
-                        // The Music Videos playlist keeps playing behind the browse UI.
-                        Button { tab = .nowPlaying } label: {
-                            TVNowPlayingBug(item: video,
-                                            artistLine: video.primaryArtist,
-                                            spinning: true)
-                        }
-                    } else if let item = player.currentItem {
-                        Button { tab = .nowPlaying } label: {
-                            TVNowPlayingBug(item: item,
-                                            artistLine: item.primaryArtist,
-                                            albumLine: item.album,
-                                            spinning: player.isPlaying || TVVideoController.shared.activeVideo != nil)
-                        }
-                    } else if let remote = SessionHub.shared.remote {
-                        Button { tab = .nowPlaying } label: {
-                            TVNowPlayingBug(item: remote.item,
-                                            artistLine: remote.item.primaryArtist,
-                                            albumLine: "Playing on \(remote.deviceName)",
-                                            spinning: !remote.isPaused)
-                        }
-                    }
-                }
-                .buttonStyle(.borderless)
-                .padding(.leading, 70)
-                .padding(.bottom, 60)
-                // NO transition here: this conditional flips when SessionHub's first poll lands
-                // (~0.5s after launch) — a transition on a root-level conditional being
-                // inserted/removed mid-layout is exactly what tripped SwiftUI's
-                // DynamicContainerInfo.tryRemovingItem assertion (flaky launch crash).
+        // The mini bar: a full-width band pinned to the bottom of EVERY page — including Now Playing in
+        // audio mode (the track sits centred above it). Non-focusable visual chrome (the Now Playing
+        // tab is how you open the full page); its gradient covers the bottom of whatever's behind.
+        .overlay(alignment: .bottom) {
+            let videoCtl = TVVideoController.shared
+            if videoCtl.direct, let video = videoCtl.activeVideo {
+                TVNowPlayingBug(item: video, artistLine: video.primaryArtist, spinning: true)
+            } else if let item = player.currentItem {
+                TVNowPlayingBug(item: item,
+                                artistLine: item.primaryArtist,
+                                albumLine: item.album,
+                                spinning: player.isPlaying || videoCtl.activeVideo != nil)
+            } else if let remote = SessionHub.shared.remote {
+                TVNowPlayingBug(item: remote.item,
+                                artistLine: remote.item.primaryArtist,
+                                albumLine: "Playing on \(remote.deviceName)",
+                                spinning: !remote.isPaused)
             }
         }
     }
@@ -211,6 +193,7 @@ struct TVPlaylistsView: View {
                                     .foregroundStyle(.white.opacity(0.9))
                             }
                             .aspectRatio(1, contentMode: .fill)
+                            .clipShape(RoundedRectangle(cornerRadius: TVDS.cover, style: .continuous))
                         }
                         .buttonStyle(.borderless)
                         VStack(alignment: .leading, spacing: 2) {
@@ -234,6 +217,7 @@ struct TVPlaylistsView: View {
                                         .foregroundStyle(.white.opacity(0.9))
                                 }
                                 .aspectRatio(1, contentMode: .fill)
+                                .clipShape(RoundedRectangle(cornerRadius: TVDS.cover, style: .continuous))
                             }
                             .buttonStyle(.borderless)
                             VStack(alignment: .leading, spacing: 2) {

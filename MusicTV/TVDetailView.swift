@@ -63,7 +63,7 @@ struct TVCollectionDetailView: View {
                     }
                 }
                 .frame(width: 480, height: 480)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: TVDS.artwork, style: .continuous))
                 .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
 
                 VStack(spacing: 6) {
