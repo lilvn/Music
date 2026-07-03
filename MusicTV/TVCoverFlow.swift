@@ -101,22 +101,24 @@ struct TVFlowCover: View {
     @Environment(JellyfinClient.self) private var client
     let item: MediaItem
     let size: CGFloat
-    let isCurrent: Bool
-    let spinning: Bool
+    /// Whether the CD is slid out of this cover. Driven by the carousel's choreography — retracted
+    /// BEFORE the flow moves, popped back out once the new centre settles — not by "is current" alone.
+    var discOut = false
+    var spinning = false
     /// Reflection is shown in the big centered mode, trimmed off in the docked (video) mode.
     var showReflection = true
 
     private var artworkStack: some View {
         ZStack {
             TVSpinningDisc(item: item, size: size * TVSpinningDisc.diameterRatio, spinning: spinning)
-                .offset(x: isCurrent ? size * TVSpinningDisc.pullOutRatio : 0)
-                .opacity(isCurrent ? 1 : 0)
+                .offset(x: discOut ? size * TVSpinningDisc.pullOutRatio : 0)
+                .opacity(discOut ? 1 : 0)
 
             cover
-                .offset(x: isCurrent ? -size * 0.1 : 0)
+                .offset(x: discOut ? -size * 0.1 : 0)
         }
         .frame(width: size, height: size)
-        .animation(.spring(response: 0.55, dampingFraction: 0.74), value: isCurrent)
+        .animation(.spring(response: 0.42, dampingFraction: 0.72), value: discOut)
     }
 
     var body: some View {
@@ -174,6 +176,23 @@ struct TVQueueCarousel: View {
     var showReflection = true
     @FocusState private var focused: Bool
 
+    // ---- Track-change choreography -------------------------------------------------------------
+    // Every transition plays the same three beats: the CD tucks back INTO the cover, the flow slides
+    // to the new centre, and only then does the new centre's CD pop out and start spinning.
+    /// Whether the centre CD is out. Never flip this directly mid-transition — the worker owns it.
+    @State private var discOut = true
+    /// The single running choreography worker (swipe or auto-advance); nil when settled.
+    @State private var transition: Task<Void, Never>?
+    /// Where the user is heading. Updated by every swipe; drained by the worker one step at a time,
+    /// so queued-up swipes play out as sequential slides instead of being lost.
+    @State private var targetIndex: Int?
+
+    /// The song is in its final second — begin tucking the CD in now, so the flow is ready to move
+    /// the instant the track actually changes and the next CD pops out as the next song starts.
+    private var nearEnd: Bool {
+        player.isPlaying && player.duration > 1 && player.duration - player.currentTime < 1.0
+    }
+
     var body: some View {
         let items = player.queue.items
         let current = player.queue.currentIndex
@@ -183,7 +202,7 @@ struct TVQueueCarousel: View {
                 let rel = i - current
                 TVFlowCover(item: items[i],
                             size: coverSize,
-                            isCurrent: rel == 0,
+                            discOut: rel == 0 && discOut && !nearEnd,
                             spinning: rel == 0 && player.isPlaying,
                             showReflection: showReflection)
                     .scaleEffect(rel == 0 ? 1 : 0.74)
@@ -204,10 +223,8 @@ struct TVQueueCarousel: View {
         .scaleEffect(focused ? 1.02 : 1.0)   // the whole flow breathes subtly when the remote is on it
         .onMoveCommand { direction in
             switch direction {
-            case .left where current > 0:
-                player.play(at: current - 1)
-            case .right where current < items.count - 1:
-                player.play(at: current + 1)
+            case .left:  step(-1, count: items.count)
+            case .right: step(+1, count: items.count)
             case .up, .down:
                 focused = false   // hand focus back to the rest of the screen (tab bar)
             default:
@@ -215,8 +232,50 @@ struct TVQueueCarousel: View {
             }
         }
         .onTapGesture { player.togglePlayPause() }   // remote click on the flow = play/pause
+        // The track changed underneath us (natural end, remote command, another device): the retract
+        // already happened via `nearEnd` — commit it and pop the new CD once the slide settles.
+        .onChange(of: player.queue.currentIndex) { _, _ in
+            startWorker(preRetracted: true)
+        }
+        .onDisappear {
+            transition?.cancel(); transition = nil
+            targetIndex = nil
+            discOut = true
+        }
         .animation(.spring(response: 0.55, dampingFraction: 0.78), value: current)
         .animation(.easeOut(duration: 0.2), value: focused)
+    }
+
+    // MARK: Choreography
+
+    /// A trackpad swipe: head one step left/right from wherever we're already heading.
+    private func step(_ delta: Int, count: Int) {
+        let base = targetIndex ?? player.queue.currentIndex
+        let next = base + delta
+        guard (0..<count).contains(next) else { return }
+        targetIndex = next
+        startWorker(preRetracted: false)
+    }
+
+    /// The one transition worker. Beats: tuck the CD in → slide (draining any queued swipe targets,
+    /// one spring per step) → pop the CD back out. A second call while running is a no-op — the
+    /// running worker picks up the new `targetIndex` in its drain loop.
+    private func startWorker(preRetracted: Bool) {
+        guard transition == nil else { return }
+        transition = Task {
+            discOut = false
+            // Swipes wait for the tuck-in to read before the flow moves; for a natural end the tuck
+            // already played during the song's final second and the slide is underway — just give it
+            // time to settle so the pop lands right as the new song starts.
+            try? await Task.sleep(for: .milliseconds(preRetracted ? 420 : 280))
+            while !Task.isCancelled, let t = targetIndex {
+                targetIndex = nil
+                if t != player.queue.currentIndex { player.play(at: t) }
+                try? await Task.sleep(for: .milliseconds(460))
+            }
+            if !Task.isCancelled { discOut = true }
+            transition = nil
+        }
     }
 
     /// Only lay out the covers near the centre — a 2,000-song queue must not build 2,000 views.
