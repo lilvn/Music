@@ -30,11 +30,13 @@ struct MusicTVApp: App {
                     player.userDidChange(to: newUserId)
                     SessionHub.shared.restart()
                 }
+                // Track changed → re-match the (muted) video backdrop to the new song, or clear it.
                 .onChange(of: player.currentItem?.id) { _, _ in
                     TVVideoController.shared.evaluate(client: client, audio: player)
                 }
+                // Play/pause the audio → freeze/resume the muted backdrop with it.
                 .onChange(of: player.isPlaying) { _, playing in
-                    if playing { TVVideoController.shared.evaluate(client: client, audio: player) }
+                    TVVideoController.shared.setPlaying(playing)
                 }
         }
     }

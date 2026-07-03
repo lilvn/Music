@@ -56,9 +56,10 @@ struct TVNowPlayingView: View {
             }
         }
         .toolbar(.hidden, for: .tabBar)   // hide the top tab bar on Now Playing (swipe up to reveal)
-        // Siri Remote play/pause drives whichever engine is live.
+        // Siri Remote play/pause: the direct playlist toggles the video (it's the sound); everything
+        // else toggles the audio Player (a matched backdrop follows via setPlaying).
         .onPlayPauseCommand {
-            inVideoMode ? videoCtl.togglePlayPause() : player.togglePlayPause()
+            videoCtl.direct ? videoCtl.togglePlayPause() : player.togglePlayPause()
         }
         // Video mode: the screen itself takes focus so trackpad swipes skip — between playlist videos
         // (direct) or between queue tracks (matched).

@@ -214,12 +214,16 @@ struct TVNowPlayingBug: View {
                 .frame(maxWidth: .infinity)
                 .allowsHitTesting(false)
 
-            // Reflective cover + CD (left) and track text, pinned to the bottom.
+            // Reflective cover + CD (left, with the playhead under it) and track text, pinned to bottom.
             HStack(alignment: .top, spacing: 34) {
-                // The mini bar carries its own text, so hide the cover's built-in label.
-                TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
-                            showReflection: true, showLabel: false)
-                    .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
+                VStack(spacing: 12) {
+                    // The mini bar carries its own text, so hide the cover's built-in label.
+                    TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
+                                showReflection: true, showLabel: false)
+                    // Track length bar, always under the artwork.
+                    TVMiniProgress().frame(width: cover)
+                }
+                .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(item.name)
@@ -238,6 +242,21 @@ struct TVNowPlayingBug: View {
             .padding(.bottom, 36)
         }
         .frame(maxWidth: .infinity, alignment: .bottom)
+    }
+}
+
+/// The current track's playhead for the mini bar. Reads the audio Player (normal + matched-video
+/// modes) or the video controller (direct playlist mode). A tiny standalone view so only IT re-renders
+/// as the time ticks — not the whole band / tab view.
+private struct TVMiniProgress: View {
+    @Environment(Player.self) private var player
+    var body: some View {
+        let ctl = TVVideoController.shared
+        let frac = ctl.direct
+            ? ctl.directProgress
+            : (player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0)
+        ProgressView(value: frac)
+            .tint(.white)
     }
 }
 

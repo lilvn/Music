@@ -16,16 +16,20 @@ final class TVVideoController {
 
     /// The music-video library (small — fetched once per launch).
     private(set) var videos: [MediaItem] = []
-    /// The video currently on screen (nil = normal audio Now Playing).
+    /// The video currently on screen (nil = normal audio Now Playing). For a matched track this is a
+    /// MUTED backdrop; for the Music Videos playlist it's the video being watched.
     private(set) var activeVideo: MediaItem?
     private(set) var avPlayer: AVPlayer?
     /// True when playing the Music Videos playlist DIRECTLY (video queue, no audio-track backing) —
     /// as opposed to a video matched to the current song.
     private(set) var direct = false
+    /// Playhead fraction (0…1) for the mini bar while in direct video mode.
+    private(set) var directProgress: Double = 0
 
     @ObservationIgnored private var directQueue: [MediaItem] = []
     @ObservationIgnored private var directIndex = 0
     @ObservationIgnored private var endObserver: NSObjectProtocol?
+    @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var loaded = false
 
     private init() {}
@@ -52,79 +56,47 @@ final class TVVideoController {
         }
     }
 
-    /// App-wide rule for the TV: a matched track NEVER plays its regular audio — the video is the
-    /// playback. Called whenever the current track (or play state) changes, from the app root, so it
-    /// applies on every page, not just Now Playing.
+    // MARK: - Matched video = a MUTED backdrop over the NORMAL audio track
+
+    /// Keep the backdrop in step with the current track. The audio track is the playback — queue,
+    /// timeline and scrobbling stay completely normal ("treat it like a normal track"); the matched
+    /// video is a muted, looping VISUAL only. Called on every track / play-state change from the root.
     func evaluate(client: JellyfinClient, audio: Player) {
-        guard !direct else { return }                    // the Music Videos playlist drives itself
-        guard let song = audio.currentItem else {
-            if activeVideo != nil { exit(audio: audio, resumeAudio: false) }
+        guard !direct else { return }                        // the Music Videos playlist drives itself
+        self.client = client
+        self.audio = audio
+        guard let song = audio.currentItem, let video = videoMatching(song) else {
+            clearBackdrop()                                  // no video for this track → plain audio NP
             return
         }
-        if let video = videoMatching(song) {
-            // Only take over when playback was actually STARTED (or we're already mid-video-channel):
-            // a matched track merely sitting restored-and-paused must not autoplay its video.
-            guard audio.wantsPlayback || audio.isPlaying || activeVideo != nil else { return }
-            enter(video: video, client: client, audio: audio)
-        } else if activeVideo != nil {
-            exit(audio: audio, resumeAudio: true)        // left video territory → audio takes over
-        }
+        showBackdrop(video, client: client, playing: audio.isPlaying)
     }
 
-    /// Switch playback to `video`: pause the audio queue, play the video with its own audio.
-    func enter(video: MediaItem, client: JellyfinClient, audio: Player) {
-        if activeVideo?.id == video.id {
-            // Same video (e.g. the next track is by the same artist, or an audio-resume blip snuck
-            // in): kill any audio, and restart the video only if it actually finished.
-            audio.pause()
-            if let av = avPlayer, let d = av.currentItem?.duration.seconds, d.isFinite,
-               av.currentTime().seconds >= d - 0.5 {
-                av.seek(to: .zero)
-                av.playImmediately(atRate: 1)
-            }
+    /// Mirror the audio's play/pause onto the muted backdrop so the picture freezes when you pause.
+    func setPlaying(_ playing: Bool) {
+        guard !direct, let avPlayer else { return }
+        playing ? avPlayer.play() : avPlayer.pause()
+    }
+
+    private func showBackdrop(_ video: MediaItem, client: JellyfinClient, playing: Bool) {
+        if activeVideo?.id == video.id {                     // same video → just sync play state
+            playing ? avPlayer?.play() : avPlayer?.pause()
             return
         }
-        guard let url = client.videoStreamURL(for: video) else { return }
-        audio.pause()
-        stopVideo()
-
-        let item = AVPlayerItem(url: url)
-        item.preferredForwardBufferDuration = 4
-        let av = AVPlayer(playerItem: item)
-        // Direct-play from the local server is fast — start immediately rather than letting AVPlayer
-        // hold at the first frame while it decides it has "enough" buffer.
-        av.automaticallyWaitsToMinimizeStalling = false
-        endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-        ) { _ in
-            Task { @MainActor in
-                let ctl = TVVideoController.shared
-                if ctl.direct {
-                    // Playing the Music Videos playlist — roll straight into the next video.
-                    ctl.advanceDirect(by: 1)
-                } else {
-                    // Matched video finished → advance the queue. The app-root evaluator decides what
-                    // the new track means: another video (or this one again), or back to audio. Keep
-                    // video mode "open" meanwhile so no stray audio leaks between tracks.
-                    Player.shared.nextTrack()
-                    TVVideoController.shared.evaluate(client: JellyfinClient.shared, audio: Player.shared)
-                }
-            }
-        }
-        av.playImmediately(atRate: 1)
-        avPlayer = av
+        guard let url = client.videoStreamURL(for: video) else { clearBackdrop(); return }
+        makePlayer(url: url, muted: true, loops: true)       // muted — the album track is the audio
         activeVideo = video
-
-        // Belt-and-braces: if the pipeline stalled at the first frame, kick it once it has buffer.
-        Task { [weak av] in
-            try? await Task.sleep(for: .seconds(3))
-            guard let av, av === self.avPlayer, av.rate == 0 else { return }
-            av.playImmediately(atRate: 1)
-        }
+        if playing { avPlayer?.playImmediately(atRate: 1) }
     }
 
-    /// Play the Music Videos playlist directly: a video queue with its own advance/skip, no
-    /// audio-track backing. The paused audio queue stays paused throughout.
+    private func clearBackdrop() {
+        guard !direct, activeVideo != nil else { return }
+        stopVideo()
+        activeVideo = nil
+    }
+
+    // MARK: - Direct Music Videos playlist = video with its OWN audio
+
     func playDirect(_ queue: [MediaItem], from index: Int, client: JellyfinClient, audio: Player) {
         guard queue.indices.contains(index) else { return }
         directQueue = queue
@@ -132,10 +104,10 @@ final class TVVideoController {
         direct = true
         self.client = client
         self.audio = audio
-        enter(video: queue[index], client: client, audio: audio)
+        audio.pause()                                        // the playlist's videos ARE the sound
+        playDirectAt(index)
     }
 
-    /// Skip within the direct playlist (trackpad swipe on the fullscreen video).
     func skipDirect(_ delta: Int, client: JellyfinClient, audio: Player) {
         guard direct else { return }
         self.client = client
@@ -143,31 +115,80 @@ final class TVVideoController {
         advanceDirect(by: delta)
     }
 
-    /// Move through the direct queue; walking off either end exits video mode.
     fileprivate func advanceDirect(by delta: Int) {
-        guard direct, let client, let audio else { return }
+        guard direct else { return }
         let next = directIndex + delta
         guard directQueue.indices.contains(next) else {
-            exit(audio: audio, resumeAudio: false)
+            if let audio { exit(audio: audio, resumeAudio: false) }
             return
         }
         directIndex = next
-        enter(video: directQueue[next], client: client, audio: audio)
+        playDirectAt(next)
     }
+
+    private func playDirectAt(_ i: Int) {
+        guard directQueue.indices.contains(i), let url = client?.videoStreamURL(for: directQueue[i]) else { return }
+        makePlayer(url: url, muted: false, loops: false)     // the video's own audio plays
+        activeVideo = directQueue[i]
+        avPlayer?.playImmediately(atRate: 1)
+    }
+
+    // MARK: - Shared engine
 
     @ObservationIgnored private weak var audio: Player?
     @ObservationIgnored private weak var client: JellyfinClient?
 
-    /// Leave video mode; optionally resume the paused audio queue.
+    private func makePlayer(url: URL, muted: Bool, loops: Bool) {
+        stopVideo()
+        let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 4
+        let av = AVPlayer(playerItem: item)
+        av.isMuted = muted
+        av.automaticallyWaitsToMinimizeStalling = false      // direct-play from a local server is fast
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+        ) { _ in
+            Task { @MainActor in
+                let ctl = TVVideoController.shared
+                if ctl.direct {
+                    ctl.advanceDirect(by: 1)                 // playlist → next video
+                } else if loops {
+                    // Backdrop loops until the AUDIO track ends (the audio queue advances the song).
+                    ctl.avPlayer?.seek(to: .zero)
+                    if Player.shared.isPlaying { ctl.avPlayer?.play() }
+                }
+            }
+        }
+        // Progress for the mini bar (used in direct mode — audio mode reads the Player instead).
+        timeObserver = av.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
+        ) { [weak self, weak av] t in
+            guard let self, let d = av?.currentItem?.duration.seconds, d.isFinite, d > 0 else { return }
+            self.directProgress = min(max(t.seconds / d, 0), 1)
+        }
+        avPlayer = av
+        // Belt-and-braces: if the pipeline stalled at the first frame, kick it once it has buffer.
+        Task { [weak av] in
+            try? await Task.sleep(for: .seconds(3))
+            guard let av, av === self.avPlayer, av.rate == 0 else { return }
+            if muted, self.audio?.isPlaying != true { return }   // a paused backdrop should stay paused
+            av.playImmediately(atRate: 1)
+        }
+    }
+
+    /// Leave video mode. Only the direct playlist ever paused the audio, so only it resumes it.
     func exit(audio: Player, resumeAudio: Bool) {
         guard activeVideo != nil else { return }
+        let wasDirect = direct
         stopVideo()
         activeVideo = nil
         direct = false
         directQueue = []
-        if resumeAudio { audio.resume() }
+        if wasDirect, resumeAudio { audio.resume() }
     }
 
+    /// Play/pause for the direct playlist (the video is the sound). Matched-video mode toggles the
+    /// audio Player instead, and setPlaying() mirrors it here.
     func togglePlayPause() {
         guard let avPlayer else { return }
         avPlayer.rate > 0 ? avPlayer.pause() : avPlayer.play()
@@ -176,8 +197,11 @@ final class TVVideoController {
     private func stopVideo() {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
+        if let timeObserver { avPlayer?.removeTimeObserver(timeObserver) }
+        timeObserver = nil
         avPlayer?.pause()
         avPlayer = nil
+        directProgress = 0
     }
 }
 
