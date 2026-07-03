@@ -9,6 +9,18 @@ enum TVCollection: Hashable {
     case liked
 }
 
+/// Starting playback from a click anywhere in the TV UI jumps to the Now Playing tab — provided by
+/// TVRootView, called by the tap sites (song rows, shelves, play/shuffle buttons).
+private struct TVOpenNowPlayingKey: EnvironmentKey {
+    static let defaultValue: @MainActor () -> Void = {}
+}
+extension EnvironmentValues {
+    var tvOpenNowPlaying: @MainActor () -> Void {
+        get { self[TVOpenNowPlayingKey.self] }
+        set { self[TVOpenNowPlayingKey.self] = newValue }
+    }
+}
+
 /// Artwork placeholder for items with no cover — mirrors the phone's dark panel look.
 struct TVPlaceholder: View {
     var body: some View {
@@ -64,10 +76,12 @@ struct TVCoverCell: View {
     }
 }
 
-/// A focusable track row: art, title/artist, duration. Highlights the playing track.
+/// A focusable track row: art, title/artist, duration. Highlights the playing track. Tapping runs
+/// `action` (start playback) and jumps to Now Playing.
 struct TVSongRow: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
+    @Environment(\.tvOpenNowPlaying) private var openNowPlaying
     let song: MediaItem
     var showArt = true
     let action: () -> Void
@@ -75,7 +89,7 @@ struct TVSongRow: View {
     private var isCurrent: Bool { player.currentItem?.id == song.id }
 
     var body: some View {
-        Button(action: action) {
+        Button(action: { action(); openNowPlaying() }) {
             HStack(spacing: 20) {
                 if showArt {
                     LibraryImage(url: client.artworkURL(for: song, size: 160), maxPixel: 160) {

@@ -5,6 +5,7 @@ import SwiftUI
 struct TVCollectionDetailView: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
+    @Environment(\.tvOpenNowPlaying) private var openNowPlaying
     let collection: TVCollection
     @State private var tracks: [MediaItem] = []
     @State private var isLoading = true
@@ -65,9 +66,11 @@ struct TVCollectionDetailView: View {
                 HStack(spacing: 20) {
                     Button {
                         player.play(items: tracks, from: 0)
+                        openNowPlaying()
                     } label: { Label("Play", systemImage: "play.fill") }
                     Button {
                         player.play(items: tracks, from: 0, shuffled: true)
+                        openNowPlaying()
                     } label: { Label("Shuffle", systemImage: "shuffle") }
                 }
                 .disabled(tracks.isEmpty)

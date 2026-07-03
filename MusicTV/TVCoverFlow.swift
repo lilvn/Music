@@ -161,64 +161,75 @@ struct TVFlowCover: View {
 
 // MARK: - The queue carousel
 
-/// The Now Playing queue as a focus-driven skeuomorphic cover flow. Clicking a cover plays it; the
-/// current track's CD slides out and spins. Follows the queue as it advances.
+/// The Now Playing queue as an iTunes-style cover flow driven directly by the remote — the exact feel
+/// of the iPhone's Featured shelf. The CENTER cover IS the now-playing track (centre = selected, so no
+/// focus platter/highlight): swiping left/right on the remote changes tracks, the flow springs across,
+/// and the CD stays slid out under the centre cover. Select toggles play/pause.
+///
+/// No per-cover Buttons: positions derive from each item's distance to the current index, so the
+/// carousel is a pure function of the queue — nothing for the focus engine to decorate.
 struct TVQueueCarousel: View {
     @Environment(Player.self) private var player
     let coverSize: CGFloat
     var showReflection = true
+    @FocusState private var focused: Bool
 
     var body: some View {
-        GeometryReader { geo in
-            let center = geo.size.width / 2
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: 12) {
-                        // Index-based ids: the same song can appear twice in a queue.
-                        ForEach(Array(player.queue.items.enumerated()), id: \.offset) { index, item in
-                            Button {
-                                player.play(at: index)
-                            } label: {
-                                TVFlowCover(item: item,
-                                            size: coverSize,
-                                            isCurrent: index == player.queue.currentIndex,
-                                            spinning: index == player.queue.currentIndex && player.isPlaying,
-                                            showReflection: showReflection)
-                            }
-                            .buttonStyle(.plain)
-                            .id(index)
-                            .visualEffect { content, vproxy in
-                                let d = vproxy.frame(in: .named("tvflow")).midX - center
-                                let t = max(-1, min(1, d / center))
-                                return content
-                                    .rotation3DEffect(.degrees(Double(-t) * 45),
-                                                      axis: (x: 0, y: 1, z: 0),
-                                                      anchor: .center, perspective: 0.5)
-                                    .scaleEffect(1 - abs(t) * 0.18)
-                            }
-                            .zIndex(index == player.queue.currentIndex ? 3 : 1)
-                        }
-                    }
-                    .scrollTargetLayout()
-                    .padding(.horizontal, center - coverSize / 2)
-                    .padding(.vertical, 30)   // room for the focus lift
-                }
-                .scrollTargetBehavior(.viewAligned)
-                .scrollClipDisabled()
-                .coordinateSpace(.named("tvflow"))
-                .onAppear { proxy.scrollTo(player.queue.currentIndex, anchor: .center) }
-                .onChange(of: player.queue.currentIndex) { _, idx in
-                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
-                        proxy.scrollTo(idx, anchor: .center)
-                    }
-                }
-                // Re-center when the carousel resizes (centered ⇄ docked video mode) — the old
-                // scroll offset is stale for the new layout.
-                .onChange(of: coverSize) { _, _ in
-                    proxy.scrollTo(player.queue.currentIndex, anchor: .center)
-                }
+        let items = player.queue.items
+        let current = player.queue.currentIndex
+
+        ZStack {
+            ForEach(visibleRange(count: items.count, current: current), id: \.self) { i in
+                let rel = i - current
+                TVFlowCover(item: items[i],
+                            size: coverSize,
+                            isCurrent: rel == 0,
+                            spinning: rel == 0 && player.isPlaying,
+                            showReflection: showReflection)
+                    .scaleEffect(rel == 0 ? 1 : 0.74)
+                    .rotation3DEffect(.degrees(rel == 0 ? 0 : (rel < 0 ? 44 : -44)),
+                                      axis: (x: 0, y: 1, z: 0),
+                                      anchor: .center, perspective: 0.45)
+                    .offset(x: xOffset(rel))
+                    .brightness(rel == 0 ? 0 : -0.07)     // side covers recede, centre reads as "selected"
+                    .opacity(abs(rel) >= 5 ? 0 : 1)       // fade out at the stack's ends
+                    .zIndex(Double(50 - abs(rel)))        // centre above its neighbours
             }
         }
-        .frame(height: coverSize * (showReflection ? 1.34 : 1.0) + 60)
+        .frame(maxWidth: .infinity)
+        .frame(height: coverSize * (showReflection ? 1.34 : 1.06))
+        .contentShape(Rectangle())
+        .focusable()
+        .focused($focused)
+        .scaleEffect(focused ? 1.02 : 1.0)   // the whole flow breathes subtly when the remote is on it
+        .onMoveCommand { direction in
+            switch direction {
+            case .left where current > 0:
+                player.play(at: current - 1)
+            case .right where current < items.count - 1:
+                player.play(at: current + 1)
+            case .up, .down:
+                focused = false   // hand focus back to the rest of the screen (tab bar)
+            default:
+                break
+            }
+        }
+        .onTapGesture { player.togglePlayPause() }   // remote click on the flow = play/pause
+        .animation(.spring(response: 0.55, dampingFraction: 0.78), value: current)
+        .animation(.easeOut(duration: 0.2), value: focused)
+    }
+
+    /// Only lay out the covers near the centre — a 2,000-song queue must not build 2,000 views.
+    private func visibleRange(count: Int, current: Int) -> Range<Int> {
+        guard count > 0 else { return 0..<0 }
+        return max(0, current - 5)..<min(count, current + 6)
+    }
+
+    /// Classic cover-flow spacing: a clear gap to the first neighbour, then a tight overlapped stack.
+    private func xOffset(_ rel: Int) -> CGFloat {
+        guard rel != 0 else { return 0 }
+        let first = coverSize * 0.74
+        let step = coverSize * 0.30
+        return CGFloat(rel.signum()) * (first + CGFloat(abs(rel) - 1) * step)
     }
 }

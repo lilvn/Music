@@ -1,17 +1,22 @@
 import SwiftUI
 
+enum TVTab: Hashable { case home, albums, playlists, nowPlaying, search }
+
 /// Top-level TV navigation: the tvOS tab bar with focus-driven browse tabs and Now Playing.
 struct TVRootView: View {
     @Environment(Player.self) private var player
+    @State private var tab: TVTab = .home
 
     var body: some View {
-        TabView {
-            Tab("Home", systemImage: "house.fill") { TVHomeView() }
-            Tab("Albums", systemImage: "square.stack.fill") { TVAlbumsView() }
-            Tab("Playlists", systemImage: "music.note.list") { TVPlaylistsView() }
-            Tab("Now Playing", systemImage: "waveform") { TVNowPlayingView() }
-            Tab("Search", systemImage: "magnifyingglass", role: .search) { TVSearchView() }
+        TabView(selection: $tab) {
+            Tab("Home", systemImage: "house.fill", value: TVTab.home) { TVHomeView() }
+            Tab("Albums", systemImage: "square.stack.fill", value: TVTab.albums) { TVAlbumsView() }
+            Tab("Playlists", systemImage: "music.note.list", value: TVTab.playlists) { TVPlaylistsView() }
+            Tab("Now Playing", systemImage: "waveform", value: TVTab.nowPlaying) { TVNowPlayingView() }
+            Tab("Search", systemImage: "magnifyingglass", value: TVTab.search, role: .search) { TVSearchView() }
         }
+        // Starting playback anywhere jumps straight to Now Playing.
+        .environment(\.tvOpenNowPlaying) { tab = .nowPlaying }
         // "Transfer to this device" floats top-right whenever another device is the one playing.
         .overlay(alignment: .topTrailing) {
             TransferButton()
@@ -26,6 +31,7 @@ struct TVRootView: View {
 struct TVHomeView: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
+    @Environment(\.tvOpenNowPlaying) private var openNowPlaying
     @State private var recentlyAdded: [MediaItem] = []
     @State private var mostPlayed: [MediaItem] = []
     @State private var playlists: [MediaItem] = []
@@ -40,10 +46,11 @@ struct TVHomeView: View {
                         TVShelf(title: "New Releases", items: recentlyAdded) { route = .album($0) }
                     }
                     if !mostPlayed.isEmpty {
-                        // Most Played is SONGS — tapping plays the run from that song.
+                        // Most Played is SONGS — tapping plays the run from that song and opens Now Playing.
                         TVShelf(title: "Most Played", items: mostPlayed) { song in
                             if let i = mostPlayed.firstIndex(of: song) {
                                 player.play(items: mostPlayed, from: i)
+                                openNowPlaying()
                             }
                         }
                     }
