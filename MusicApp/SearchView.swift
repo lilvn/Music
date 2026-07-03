@@ -34,8 +34,11 @@ struct SearchView: View {
                     resultsList
                 }
             }
-            .navigationTitle("Search")
-            .navigationBarTitleDisplayMode(.inline)
+            // Hide the top nav bar (like the library tabs do) so detail views pushed from Search don't
+            // inherit its reserved height — that residual space was pushing their custom header down,
+            // making the album/artist view look different from everywhere else. The native search field
+            // is the bottom role:.search field, which is unaffected by hiding the top bar.
+            .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: LibraryRoute.self) { route in
                 destinationView(for: route)
                     .navigationTransition(.zoom(sourceID: route.id, in: ns))
