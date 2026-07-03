@@ -17,6 +17,13 @@ struct TVRootView: View {
         }
         // Starting playback anywhere jumps straight to Now Playing.
         .environment(\.tvOpenNowPlaying) { tab = .nowPlaying }
+        // The Siri Remote play/pause button toggles playback from ANY tab / focus — including a track
+        // restored (paused) at launch, where focus sits on the tab bar and never reached Now Playing's
+        // own handler. The direct Music Videos playlist toggles the video; everything else the audio.
+        .onPlayPauseCommand {
+            let v = TVVideoController.shared
+            v.direct ? v.togglePlayPause() : player.togglePlayPause()
+        }
         // "Transfer to this device" floats top-right whenever another device is the one playing.
         .overlay(alignment: .topTrailing) {
             TransferButton()

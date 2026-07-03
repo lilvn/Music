@@ -148,13 +148,13 @@ struct TVFlowCover: View {
                     if showLabel {
                     VStack(spacing: 3) {
                         Text(item.name)
-                            .font(emphasized ? .headline : .caption)
+                            .font(emphasized ? .subheadline : .caption)
                             .fontWeight(emphasized ? .semibold : .regular)
                             .foregroundStyle(emphasized ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                             .lineLimit(1)
                         if emphasized {
                             Text(item.primaryArtist)
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
@@ -205,44 +205,44 @@ struct TVNowPlayingBug: View {
     private let cover: CGFloat = 128
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            // The whole bottom is a black gradient fading UP to clear, so it covers content at the
-            // bottom (a grid, or a playing video) and fades out around the track title.
+        // Reflective cover + CD (left, with the playhead under it) and track text.
+        HStack(alignment: .top, spacing: 34) {
+            VStack(spacing: 12) {
+                // The mini bar carries its own text, so hide the cover's built-in label.
+                TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
+                            showReflection: true, showLabel: false)
+                // Track length bar, always under the artwork.
+                TVMiniProgress().frame(width: cover)
+            }
+            .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.name)
+                    .font(.caption).fontWeight(.semibold)
+                    .lineLimit(1)
+                if let artistLine, !artistLine.isEmpty {
+                    Text(artistLine).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+                if let albumLine, !albumLine.isEmpty {
+                    Text(albumLine).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                }
+            }
+            .padding(.top, 8)
+        }
+        .padding(.horizontal, 70)
+        .padding(.bottom, 36)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // The whole bottom is a black gradient fading UP to clear, covering content behind (a grid, or a
+        // playing video) and fading out around the title. As a full-width BACKGROUND it bleeds evenly to
+        // both physical screen edges — a leading-aligned ZStack child pinned its left edge to the inset.
+        .background(alignment: .bottom) {
             LinearGradient(colors: [.black, .black.opacity(0.9), .clear],
                            startPoint: .bottom, endPoint: .top)
                 .frame(height: 340)
                 .frame(maxWidth: .infinity)
-                .ignoresSafeArea()          // reach the physical screen edges, past the tvOS overscan inset
+                .ignoresSafeArea()
                 .allowsHitTesting(false)
-
-            // Reflective cover + CD (left, with the playhead under it) and track text, pinned to bottom.
-            HStack(alignment: .top, spacing: 34) {
-                VStack(spacing: 12) {
-                    // The mini bar carries its own text, so hide the cover's built-in label.
-                    TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
-                                showReflection: true, showLabel: false)
-                    // Track length bar, always under the artwork.
-                    TVMiniProgress().frame(width: cover)
-                }
-                .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.name)
-                        .font(.caption).fontWeight(.semibold)
-                        .lineLimit(1)
-                    if let artistLine, !artistLine.isEmpty {
-                        Text(artistLine).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    if let albumLine, !albumLine.isEmpty {
-                        Text(albumLine).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-                    }
-                }
-                .padding(.top, 8)
-            }
-            .padding(.horizontal, 70)
-            .padding(.bottom, 36)
         }
-        .frame(maxWidth: .infinity, alignment: .bottom)
     }
 }
 
@@ -273,8 +273,6 @@ private struct TVMiniProgress: View {
 struct TVNowPlayingArtwork: View {
     @Environment(Player.self) private var player
     let coverSize: CGFloat
-    /// Called on any remote input here so the parent can keep the tab bar's idle timer alive.
-    var onInteract: () -> Void = {}
     @FocusState private var focused: Bool
 
     // ---- Track-change choreography -------------------------------------------------------------
@@ -316,7 +314,6 @@ struct TVNowPlayingArtwork: View {
         .focused($focused)
         .scaleEffect(focused ? 1.02 : 1.0)   // breathes subtly when the remote is on it
         .onMoveCommand { direction in
-            onInteract()
             switch direction {
             case .left:  step(-1)
             case .right: step(+1)
@@ -326,7 +323,7 @@ struct TVNowPlayingArtwork: View {
                 break
             }
         }
-        .onTapGesture { onInteract(); player.togglePlayPause() }   // remote click = play/pause
+        .onTapGesture { player.togglePlayPause() }   // remote click = play/pause
         // The track changed underneath us (natural end, remote command, another device): the retract
         // already happened via `nearEnd` — commit it and pop the new CD once the swap settles.
         .onChange(of: player.queue.currentIndex) { _, _ in
