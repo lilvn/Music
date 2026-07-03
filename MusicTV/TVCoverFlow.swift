@@ -121,21 +121,45 @@ struct TVFlowCover: View {
         .animation(.spring(response: 0.42, dampingFraction: 0.72), value: discOut)
     }
 
+    /// Center cover gets title + artist; side covers a dimmer title — like the iPhone shelf's labels.
+    var emphasized = false
+
     var body: some View {
         VStack(spacing: 0) {
             artworkStack
 
             if showReflection {
                 let fraction: CGFloat = 0.30
-                artworkStack
-                    .scaleEffect(y: -1)
-                    .frame(height: size * fraction, alignment: .top)
-                    .mask(
-                        LinearGradient(colors: [.white.opacity(0.18), .clear],
-                                       startPoint: .top, endPoint: .bottom)
-                            .frame(width: size * 2.4, height: size * fraction)
-                    )
-                    .allowsHitTesting(false)
+                ZStack(alignment: .top) {
+                    artworkStack
+                        .scaleEffect(y: -1)
+                        .frame(height: size * fraction, alignment: .top)
+                        .mask(
+                            LinearGradient(colors: [.white.opacity(0.18), .clear],
+                                           startPoint: .top, endPoint: .bottom)
+                                .frame(width: size * 2.4, height: size * fraction)
+                        )
+                        .allowsHitTesting(false)
+
+                    // Track name floats over the reflection, following the cover's slide.
+                    VStack(spacing: 3) {
+                        Text(item.name)
+                            .font(emphasized ? .headline : .caption)
+                            .fontWeight(emphasized ? .semibold : .regular)
+                            .foregroundStyle(emphasized ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                            .lineLimit(1)
+                        if emphasized {
+                            Text(item.primaryArtist)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(width: size * 1.15)
+                    .padding(.top, 14)
+                    .offset(x: discOut ? -size * 0.1 : 0)
+                    .animation(.spring(response: 0.42, dampingFraction: 0.72), value: discOut)
+                }
             }
         }
         .frame(width: size)
@@ -204,14 +228,15 @@ struct TVQueueCarousel: View {
                             size: coverSize,
                             discOut: rel == 0 && discOut && !nearEnd,
                             spinning: rel == 0 && player.isPlaying,
-                            showReflection: showReflection)
+                            showReflection: showReflection,
+                            emphasized: rel == 0)
                     .scaleEffect(rel == 0 ? 1 : 0.74)
                     .rotation3DEffect(.degrees(rel == 0 ? 0 : (rel < 0 ? 44 : -44)),
                                       axis: (x: 0, y: 1, z: 0),
                                       anchor: .center, perspective: 0.45)
                     .offset(x: xOffset(rel))
                     .brightness(rel == 0 ? 0 : -0.07)     // side covers recede, centre reads as "selected"
-                    .opacity(abs(rel) >= 5 ? 0 : 1)       // fade out at the stack's ends
+                    .opacity(abs(rel) >= 2 ? 0 : 1)       // ONLY prev / current / next are visible
                     .zIndex(Double(50 - abs(rel)))        // centre above its neighbours
             }
         }
@@ -278,10 +303,11 @@ struct TVQueueCarousel: View {
         }
     }
 
-    /// Only lay out the covers near the centre — a 2,000-song queue must not build 2,000 views.
+    /// Lay out current ± 2: prev/current/next are visible, the ±2 covers ride along invisibly so a
+    /// slide has an incoming cover to animate in from the wings instead of popping.
     private func visibleRange(count: Int, current: Int) -> Range<Int> {
         guard count > 0 else { return 0..<0 }
-        return max(0, current - 5)..<min(count, current + 6)
+        return max(0, current - 2)..<min(count, current + 3)
     }
 
     /// Classic cover-flow spacing: a clear gap to the first neighbour, then a tight overlapped stack.

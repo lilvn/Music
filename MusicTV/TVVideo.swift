@@ -19,7 +19,12 @@ final class TVVideoController {
     /// The video currently on screen (nil = normal audio Now Playing).
     private(set) var activeVideo: MediaItem?
     private(set) var avPlayer: AVPlayer?
+    /// True when playing the Music Videos playlist DIRECTLY (video queue, no audio-track backing) —
+    /// as opposed to a video matched to the current song.
+    private(set) var direct = false
 
+    @ObservationIgnored private var directQueue: [MediaItem] = []
+    @ObservationIgnored private var directIndex = 0
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var loaded = false
 
@@ -61,13 +66,19 @@ final class TVVideoController {
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
         ) { _ in
-            // Video finished → move the queue along; the Now Playing view re-evaluates the new track
-            // (next video, or exit back to audio).
             Task { @MainActor in
-                TVVideoController.shared.stopVideo()
-                TVVideoController.shared.activeVideo = nil
-                Player.shared.nextTrack()
-                Player.shared.resume()
+                let ctl = TVVideoController.shared
+                if ctl.direct {
+                    // Playing the Music Videos playlist — roll straight into the next video.
+                    ctl.advanceDirect(by: 1)
+                } else {
+                    // Matched video finished → move the audio queue along; Now Playing re-evaluates
+                    // the new track (next video, or back to audio).
+                    ctl.stopVideo()
+                    ctl.activeVideo = nil
+                    Player.shared.nextTrack()
+                    Player.shared.resume()
+                }
             }
         }
         av.playImmediately(atRate: 1)
@@ -82,11 +93,48 @@ final class TVVideoController {
         }
     }
 
+    /// Play the Music Videos playlist directly: a video queue with its own advance/skip, no
+    /// audio-track backing. The paused audio queue stays paused throughout.
+    func playDirect(_ queue: [MediaItem], from index: Int, client: JellyfinClient, audio: Player) {
+        guard queue.indices.contains(index) else { return }
+        directQueue = queue
+        directIndex = index
+        direct = true
+        self.client = client
+        self.audio = audio
+        enter(video: queue[index], client: client, audio: audio)
+    }
+
+    /// Skip within the direct playlist (trackpad swipe on the fullscreen video).
+    func skipDirect(_ delta: Int, client: JellyfinClient, audio: Player) {
+        guard direct else { return }
+        self.client = client
+        self.audio = audio
+        advanceDirect(by: delta)
+    }
+
+    /// Move through the direct queue; walking off either end exits video mode.
+    fileprivate func advanceDirect(by delta: Int) {
+        guard direct, let client, let audio else { return }
+        let next = directIndex + delta
+        guard directQueue.indices.contains(next) else {
+            exit(audio: audio, resumeAudio: false)
+            return
+        }
+        directIndex = next
+        enter(video: directQueue[next], client: client, audio: audio)
+    }
+
+    @ObservationIgnored private weak var audio: Player?
+    @ObservationIgnored private weak var client: JellyfinClient?
+
     /// Leave video mode; optionally resume the paused audio queue.
     func exit(audio: Player, resumeAudio: Bool) {
         guard activeVideo != nil else { return }
         stopVideo()
         activeVideo = nil
+        direct = false
+        directQueue = []
         if resumeAudio { audio.resume() }
     }
 

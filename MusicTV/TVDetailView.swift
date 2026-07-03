@@ -14,7 +14,7 @@ struct TVCollectionDetailView: View {
         switch collection {
         case .album(let a): a
         case .playlist(let p): p
-        case .liked: nil
+        case .liked, .musicVideos: nil
         }
     }
     private var title: String {
@@ -22,6 +22,7 @@ struct TVCollectionDetailView: View {
         case .album(let a): a.name
         case .playlist(let p): p.name
         case .liked: "Liked Songs"
+        case .musicVideos: "Music Videos"
         }
     }
     private var subtitle: String {
@@ -29,8 +30,14 @@ struct TVCollectionDetailView: View {
         case .album(let a): a.albumArtist ?? a.primaryArtist
         case .playlist: "Playlist"
         case .liked: "\(tracks.count) songs"
+        case .musicVideos: "\(tracks.count) videos"
         }
     }
+    /// Icon for the coverless header tile (Liked Songs / Music Videos).
+    private var placeholderIcon: String {
+        if case .musicVideos = collection { "play.rectangle.fill" } else { "heart.fill" }
+    }
+    private var isVideos: Bool { if case .musicVideos = collection { true } else { false } }
 
     var body: some View {
         HStack(alignment: .top, spacing: 60) {
@@ -46,7 +53,7 @@ struct TVCollectionDetailView: View {
                             LinearGradient(colors: [Color(red: 0.30, green: 0.30, blue: 0.32),
                                                     Color(red: 0.03, green: 0.03, blue: 0.05)],
                                            startPoint: .top, endPoint: .bottom)
-                            Image(systemName: "heart.fill")
+                            Image(systemName: placeholderIcon)
                                 .font(.system(size: 96))
                                 .foregroundStyle(.white.opacity(0.9))
                         }
@@ -65,11 +72,19 @@ struct TVCollectionDetailView: View {
 
                 HStack(spacing: 20) {
                     Button {
-                        player.play(items: tracks, from: 0)
+                        if isVideos {
+                            TVVideoController.shared.playDirect(tracks, from: 0, client: client, audio: player)
+                        } else {
+                            player.play(items: tracks, from: 0)
+                        }
                         openNowPlaying()
                     } label: { Label("Play", systemImage: "play.fill") }
                     Button {
-                        player.play(items: tracks, from: 0, shuffled: true)
+                        if isVideos {
+                            TVVideoController.shared.playDirect(tracks.shuffled(), from: 0, client: client, audio: player)
+                        } else {
+                            player.play(items: tracks, from: 0, shuffled: true)
+                        }
                         openNowPlaying()
                     } label: { Label("Shuffle", systemImage: "shuffle") }
                 }
@@ -87,7 +102,11 @@ struct TVCollectionDetailView: View {
                     } else {
                         ForEach(Array(tracks.enumerated()), id: \.element.id) { i, track in
                             TVSongRow(song: track, showArt: !isAlbum) {
-                                player.play(items: tracks, from: i)
+                                if isVideos {
+                                    TVVideoController.shared.playDirect(tracks, from: i, client: client, audio: player)
+                                } else {
+                                    player.play(items: tracks, from: i)
+                                }
                             }
                         }
                     }
@@ -107,6 +126,9 @@ struct TVCollectionDetailView: View {
         switch collection {
         case .album(let a):    tracks = (try? await client.fetchAlbumTracks(albumId: a.id)) ?? []
         case .playlist(let p): tracks = (try? await client.fetchPlaylistItems(playlistId: p.id)) ?? []
+        case .musicVideos:
+            await TVVideoController.shared.loadLibrary(client: client)
+            tracks = TVVideoController.shared.videos
         case .liked:
             let fetched = (try? await client.fetchFavoriteSongs()) ?? []
             client.favoriteIds = Set(fetched.map(\.id))

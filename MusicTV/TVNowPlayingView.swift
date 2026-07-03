@@ -26,28 +26,22 @@ struct TVNowPlayingView: View {
                 TVBackdrop(item: player.currentItem ?? SessionHub.shared.remote?.item)
             }
 
-            if player.currentItem != nil {
+            if player.currentItem != nil || inVideoMode {
                 VStack(spacing: 0) {
-                    if !inVideoMode {
-                        trackInfo
-                            .padding(.top, 30)
-                        Spacer(minLength: 0)
-                    } else {
-                        Spacer(minLength: 0)
-                    }
-
-                    // ----- The skeuomorphic carousel: centered when listening, docked over the video -----
-                    TVQueueCarousel(coverSize: inVideoMode ? 150 : 340,
-                                    showReflection: !inVideoMode)
+                    Spacer(minLength: 0)
 
                     if !inVideoMode {
-                        Spacer(minLength: 0)
+                        // ----- Centered: the carousel (names under the covers) with the playhead below -----
+                        TVQueueCarousel(coverSize: 340, showReflection: true)
                         progressBar
-                            .padding(.bottom, 40)
-                    } else {
-                        // Dock hugs the bottom edge.
+                            .padding(.top, 8)
+                        Spacer(minLength: 0)
+                    } else if !videoCtl.direct {
+                        // ----- Matched-video mode: the carousel docks to the bottom over the video -----
+                        TVQueueCarousel(coverSize: 150, showReflection: false)
                         Color.clear.frame(height: 8)
                     }
+                    // Direct video playback (the Music Videos playlist): clean fullscreen, no dock.
                 }
                 .animation(.spring(response: 0.6, dampingFraction: 0.85), value: inVideoMode)
             } else if let remote = SessionHub.shared.remote {
@@ -69,6 +63,17 @@ struct TVNowPlayingView: View {
         .onPlayPauseCommand {
             inVideoMode ? videoCtl.togglePlayPause() : player.togglePlayPause()
         }
+        // Direct video playback: with the carousel hidden, the screen itself takes focus so trackpad
+        // swipes skip between videos in the playlist.
+        .focusable(videoCtl.direct)
+        .onMoveCommand { direction in
+            guard videoCtl.direct else { return }
+            switch direction {
+            case .left:  videoCtl.skipDirect(-1, client: client, audio: player)
+            case .right: videoCtl.skipDirect(+1, client: client, audio: player)
+            default: break
+            }
+        }
         .task {
             await videoCtl.loadLibrary(client: client)
             reevaluateVideo()   // the library may load AFTER onAppear's evaluation — re-check
@@ -77,13 +82,18 @@ struct TVNowPlayingView: View {
         // audio and video presentation to match it.
         .onChange(of: player.currentItem?.id) { _, _ in reevaluateVideo() }
         .onAppear { reevaluateVideo() }
-        // Leaving Now Playing hands playback back to the audio queue.
-        .onDisappear { videoCtl.exit(audio: player, resumeAudio: player.currentItem != nil) }
+        // Leaving Now Playing hands playback back to the audio queue (a direct video playlist just
+        // stops — don't blast paused audio at someone who was watching videos).
+        .onDisappear {
+            videoCtl.exit(audio: player, resumeAudio: player.currentItem != nil && !videoCtl.direct)
+        }
     }
 
     /// Enter video mode when the current song has a library music video; exit (resuming audio) when
-    /// it doesn't.
+    /// it doesn't. Direct playback (the Music Videos playlist) is driven by the controller, not the
+    /// audio queue — leave it alone.
     private func reevaluateVideo() {
+        guard !videoCtl.direct else { return }
         guard let song = player.currentItem else {
             videoCtl.exit(audio: player, resumeAudio: false)
             return
@@ -97,22 +107,9 @@ struct TVNowPlayingView: View {
 
     // MARK: - Chrome (minimal liquid glass)
 
-    private var trackInfo: some View {
-        VStack(spacing: 6) {
-            Text(player.currentItem?.name ?? "")
-                .font(.title3).fontWeight(.bold)
-                .lineLimit(1)
-            Text(player.currentItem?.primaryArtist ?? "")
-                .font(.callout).foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 36)
-        .padding(.vertical, 18)
-        .background(.ultraThinMaterial, in: .capsule)
-    }
-
+    /// The playhead, sitting right under the carousel.
     private var progressBar: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             ProgressView(value: player.duration > 0 ? min(player.currentTime / player.duration, 1) : 0)
                 .tint(.white)
             HStack {
@@ -122,10 +119,10 @@ struct TVNowPlayingView: View {
             }
             .font(.caption).monospacedDigit().foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 18)
-        .frame(width: 760)
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: 24))
+        .padding(.horizontal, 24)
+        .padding(.vertical, 14)
+        .frame(width: 640)
+        .background(.ultraThinMaterial, in: .rect(cornerRadius: 22))
     }
 
     /// Mirror of a remote session: its artwork + track, with controls that drive THAT device.

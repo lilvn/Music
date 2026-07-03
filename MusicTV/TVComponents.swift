@@ -7,6 +7,7 @@ enum TVCollection: Hashable {
     case album(MediaItem)
     case playlist(MediaItem)
     case liked
+    case musicVideos
 }
 
 /// Starting playback from a click anywhere in the TV UI jumps to the Now Playing tab — provided by

@@ -141,6 +141,30 @@ struct TVPlaylistsView: View {
                         .padding(.horizontal, 4)
                     }
 
+                    // All the library's music videos as one playlist.
+                    if !TVVideoController.shared.videos.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Button { route = .musicVideos } label: {
+                                ZStack {
+                                    LinearGradient(colors: [Color(red: 0.16, green: 0.18, blue: 0.30),
+                                                            Color(red: 0.03, green: 0.03, blue: 0.05)],
+                                                   startPoint: .top, endPoint: .bottom)
+                                    Image(systemName: "play.rectangle.fill")
+                                        .font(.system(size: 72))
+                                        .foregroundStyle(.white.opacity(0.9))
+                                }
+                                .aspectRatio(1, contentMode: .fill)
+                            }
+                            .buttonStyle(.borderless)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Music Videos").font(.callout).lineLimit(1)
+                                Text("\(TVVideoController.shared.videos.count) videos")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 4)
+                        }
+                    }
+
                     ForEach(playlists) { p in
                         TVCoverCell(item: p, subtitle: "Playlist") { route = .playlist(p) }
                     }
@@ -152,6 +176,7 @@ struct TVPlaylistsView: View {
             .task {
                 if playlists.isEmpty { playlists = (try? await client.fetchPlaylists()) ?? [] }
                 await client.refreshFavorites()
+                await TVVideoController.shared.loadLibrary(client: client)
             }
         }
     }
