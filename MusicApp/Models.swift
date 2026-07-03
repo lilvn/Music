@@ -77,6 +77,41 @@ struct ItemsResponse: Codable {
     }
 }
 
+/// One active session on the server — another device (or Jellyfin client) and what it's playing.
+/// Powers the cross-device shared Now Playing.
+struct SessionInfo: Codable, Identifiable {
+    let id: String
+    let userId: String?
+    let deviceId: String?
+    let deviceName: String?
+    let client: String?
+    let nowPlayingItem: MediaItem?
+    let playState: PlayState?
+    let nowPlayingQueue: [QueueEntry]?
+    let supportsRemoteControl: Bool?
+    let lastActivityDate: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "Id", userId = "UserId", deviceId = "DeviceId", deviceName = "DeviceName"
+        case client = "Client", nowPlayingItem = "NowPlayingItem", playState = "PlayState"
+        case nowPlayingQueue = "NowPlayingQueue", supportsRemoteControl = "SupportsRemoteControl"
+        case lastActivityDate = "LastActivityDate"
+    }
+
+    struct PlayState: Codable {
+        let positionTicks: Int64?
+        let isPaused: Bool?
+        enum CodingKeys: String, CodingKey {
+            case positionTicks = "PositionTicks", isPaused = "IsPaused"
+        }
+    }
+
+    struct QueueEntry: Codable {
+        let id: String
+        enum CodingKeys: String, CodingKey { case id = "Id" }
+    }
+}
+
 struct LyricResponse: Codable {
     let lyrics: [LyricLine]
     enum CodingKeys: String, CodingKey { case lyrics = "Lyrics" }

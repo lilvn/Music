@@ -150,6 +150,19 @@ final class Player {
         Task { await refreshAutoplay() }
     }
 
+    /// Start a new context and resume at `seconds` — used when a session is TRANSFERRED from another
+    /// device, so playback picks up exactly where that device left off.
+    func play(items: [MediaItem], from index: Int, startingAt seconds: Double) {
+        play(items: items, from: index)
+        // play() clears pendingSeekTime (fresh contexts don't resume) — set it after, so observeStatus
+        // applies the seek once the item is ready, exactly like a restored session.
+        if seconds > 1 { pendingSeekTime = seconds }
+    }
+
+    /// Remote-command helpers (Jellyfin Playstate "Pause"/"Unpause" are explicit, not toggles).
+    func pause() { if isPlaying { togglePlayPause() } }
+    func resume() { if !isPlaying, queue.currentItem != nil { togglePlayPause() } }
+
     /// Jump to an existing item in the current queue (e.g. tapping in the Up Next list).
     func play(at index: Int) {
         guard queue.items.indices.contains(index) else { return }
@@ -989,17 +1002,26 @@ final class Player {
 
     private var currentTicks: Int64 { Int64(max(0, currentTime) * 10_000_000) }
 
+    /// The queue as reported to the server (windowed around the current track so a "shuffle all songs"
+    /// queue doesn't bloat every progress report) — lets other devices mirror it and transfer mid-album.
+    private var reportedQueueIds: [String] {
+        let start = max(0, queue.currentIndex - 30)
+        return Array(queue.items[start..<min(queue.items.count, start + 200)].map(\.id))
+    }
+
     private func reportStart() {
         guard let id = currentItem?.id else { return }
         reportedItemId = id
         let ticks = currentTicks
-        Task { await client.reportPlaybackStart(itemId: id, positionTicks: ticks) }
+        let ids = reportedQueueIds
+        Task { await client.reportPlaybackStart(itemId: id, positionTicks: ticks, queueIds: ids) }
     }
 
     private func reportProgress(paused: Bool) {
         guard let id = reportedItemId else { return }
         let ticks = currentTicks
-        Task { await client.reportPlaybackProgress(itemId: id, positionTicks: ticks, isPaused: paused) }
+        let ids = reportedQueueIds
+        Task { await client.reportPlaybackProgress(itemId: id, positionTicks: ticks, isPaused: paused, queueIds: ids) }
     }
 
     private func reportStop() {

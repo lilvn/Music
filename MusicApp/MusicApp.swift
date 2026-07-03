@@ -57,6 +57,7 @@ struct MusicApp: App {
             .task {
                 AudioStore.shared.attach(client)
                 if client.isAuthenticated { AudioStore.shared.refreshPinnedLibrary() }
+                SessionHub.shared.start(client: client, player: player)
             }
             // The signed-in Jellyfin user changed (login / switch / sign-out): re-point per-user state
             // — Recently Played history and Liked Songs both belong to that specific account.
@@ -64,6 +65,7 @@ struct MusicApp: App {
                 player.userDidChange(to: newUserId)
                 Task { await client.refreshFavorites() }
                 AudioStore.shared.refreshPinnedLibrary()
+                SessionHub.shared.restart()
             }
         }
     }

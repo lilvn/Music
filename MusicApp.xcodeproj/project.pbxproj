@@ -47,6 +47,8 @@
 				JellyfinClient.swift,
 				Models.swift,
 				Player.swift,
+				SessionHub.swift,
+				SharedNowPlaying.swift,
 			);
 			target = B40AB70C2FF816AD00591F25 /* MusicTV */;
 		};

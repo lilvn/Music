@@ -39,7 +39,17 @@ struct RootTabView: View {
         .tabViewBottomAccessory {
             if player.currentItem != nil {
                 MiniPlayer(namespace: npZoom, appColorScheme: colorScheme)
+            } else if SessionHub.shared.remote != nil {
+                // Nothing loaded locally, but another device of this account is playing —
+                // mirror it here; the controls drive that device.
+                RemoteMiniBar()
             }
+        }
+        // "Transfer to this device" floats top-right whenever another device is the one playing.
+        .overlay(alignment: .topTrailing) {
+            TransferButton()
+                .padding(.trailing, 16)
+                .padding(.top, 4)
         }
         // Now Playing zoom-expands from the mini player. `fullScreenCover` (not `.sheet`) is what
         // actually animates `.navigationTransition(.zoom)` on this build.

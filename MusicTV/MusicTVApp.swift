@@ -23,7 +23,14 @@ struct MusicTVApp: App {
             .environment(player)
             // Queue pre-buffering reuses the shared AudioStore; we skip the full library auto-download
             // on the TV (it's a plugged-in streaming box, not a phone that leaves the house).
-            .task { AudioStore.shared.attach(client) }
+            .task {
+                AudioStore.shared.attach(client)
+                SessionHub.shared.start(client: client, player: player)
+            }
+            .onChange(of: client.userId) { _, newUserId in
+                player.userDidChange(to: newUserId)
+                SessionHub.shared.restart()
+            }
         }
     }
 }

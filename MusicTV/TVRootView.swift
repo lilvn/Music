@@ -12,6 +12,12 @@ struct TVRootView: View {
             Tab("Now Playing", systemImage: "waveform") { TVNowPlayingView() }
             Tab("Search", systemImage: "magnifyingglass", role: .search) { TVSearchView() }
         }
+        // "Transfer to this device" floats top-right whenever another device is the one playing.
+        .overlay(alignment: .topTrailing) {
+            TransferButton()
+                .padding(.trailing, 60)
+                .padding(.top, 20)
+        }
     }
 }
 

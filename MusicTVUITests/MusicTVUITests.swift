@@ -1,43 +1,43 @@
-//
-//  MusicTVUITests.swift
-//  MusicTVUITests
-//
-//  Created by VN on 7/3/26.
-//
-
 import XCTest
 
+/// Drives the tvOS app with the virtual Siri Remote and captures screenshots into the result bundle.
+/// All waits pump the run loop (XCTWaiter) — a bare `sleep()` blocks the runner's main thread and
+/// FrontBoard watchdog-kills it (0x8BADF00D).
 final class MusicTVUITests: XCTestCase {
 
     override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-
-        // In UI tests it is usually best to stop immediately when a failure occurs.
         continueAfterFailure = false
-
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
-    }
-
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    private func hold(_ seconds: TimeInterval) {
+        _ = XCTWaiter.wait(for: [expectation(description: "hold")], timeout: seconds)
+    }
+
+    @MainActor
+    private func snap(_ name: String) {
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    @MainActor
+    func testOpenNowPlayingAndHold() throws {
         let app = XCUIApplication()
         app.launch()
+        hold(14)   // login, shelves, session restore
+        snap("1-home")
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
-    }
-
-    @MainActor
-    func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
+        let remote = XCUIRemote.shared
+        remote.press(.up); hold(1)      // focus up to the tab bar
+        remote.press(.up); hold(1)
+        for _ in 0..<3 {                // Home → Albums → Playlists → Now Playing
+            remote.press(.right); hold(1)
         }
+        hold(6)                         // NP appears; video mode engages if a video matches
+        snap("2-nowplaying")
+        hold(10)                        // video buffering / carousel settle
+        snap("3-nowplaying-later")
     }
 }

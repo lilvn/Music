@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Jellyfin REST data layer. Async `URLSession` throughout — no Combine.
 /// Personal single-user app: credentials are baked in, there is no login flow.
@@ -45,8 +48,29 @@ final class JellyfinClient {
 
     private var baseURL: URL? { URL(string: serverURL) }
 
+    /// Stable per-install device id. REQUIRED for cross-device control: with the old hardcoded id every
+    /// device reported as the SAME session, so the server couldn't tell an iPhone from an Apple TV.
+    static let deviceId: String = {
+        let key = "jf.deviceId"
+        if let id = UserDefaults.standard.string(forKey: key) { return id }
+        let id = UUID().uuidString
+        UserDefaults.standard.set(id, forKey: key)
+        return id
+    }()
+
+    /// Human-readable device name shown in other devices' "playing on …" UI.
+    static var deviceName: String {
+#if os(tvOS)
+        "Apple TV"
+#elseif os(macOS)
+        "Mac"
+#else
+        UIDevice.current.model   // "iPhone" / "iPad"
+#endif
+    }
+
     private var deviceAuthHeader: String {
-        "MediaBrowser Client=\"Music\", Device=\"Apple\", DeviceId=\"music-app-001\", Version=\"1.0\""
+        "MediaBrowser Client=\"Music2.0\", Device=\"\(Self.deviceName)\", DeviceId=\"\(Self.deviceId)\", Version=\"1.0\""
     }
     private var authHeader: String { "\(deviceAuthHeader), Token=\"\(accessToken)\"" }
 
@@ -420,30 +444,121 @@ final class JellyfinClient {
 
     // MARK: - Playback reporting (scrobble play state back to Jellyfin)
 
-    func reportPlaybackStart(itemId: String, positionTicks: Int64) async {
-        await postPlayback("Sessions/Playing", itemId: itemId, positionTicks: positionTicks, isPaused: false)
+    func reportPlaybackStart(itemId: String, positionTicks: Int64, queueIds: [String] = []) async {
+        await postPlayback("Sessions/Playing", itemId: itemId, positionTicks: positionTicks,
+                           isPaused: false, queueIds: queueIds)
     }
-    func reportPlaybackProgress(itemId: String, positionTicks: Int64, isPaused: Bool) async {
-        await postPlayback("Sessions/Playing/Progress", itemId: itemId, positionTicks: positionTicks, isPaused: isPaused)
+    func reportPlaybackProgress(itemId: String, positionTicks: Int64, isPaused: Bool, queueIds: [String] = []) async {
+        await postPlayback("Sessions/Playing/Progress", itemId: itemId, positionTicks: positionTicks,
+                           isPaused: isPaused, queueIds: queueIds)
     }
     func reportPlaybackStopped(itemId: String, positionTicks: Int64) async {
         await postPlayback("Sessions/Playing/Stopped", itemId: itemId, positionTicks: positionTicks, isPaused: false)
     }
 
-    private func postPlayback(_ path: String, itemId: String, positionTicks: Int64, isPaused: Bool) async {
+    private func postPlayback(_ path: String, itemId: String, positionTicks: Int64,
+                              isPaused: Bool, queueIds: [String] = []) async {
         guard let base = baseURL else { return }
         var req = URLRequest(url: base.appendingPathComponent(path))
         req.httpMethod = "POST"
         req.setValue(authHeader, forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+        var body: [String: Any] = [
             "ItemId": itemId,
             "PositionTicks": positionTicks,
             "IsPaused": isPaused,
             "PlayMethod": "DirectStream",
             "CanSeek": true,
+        ]
+        // Report the queue so other devices can mirror it and "transfer here" mid-album.
+        if !queueIds.isEmpty { body["NowPlayingQueue"] = queueIds.map { ["Id": $0] } }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        _ = try? await URLSession.shared.data(for: req)
+    }
+
+    // MARK: - Sessions (cross-device shared Now Playing)
+
+    /// All active sessions visible to this user (other devices, other Jellyfin clients).
+    func fetchSessions() async throws -> [SessionInfo] {
+        guard let base = baseURL else { throw APIError.invalidURL }
+        var comps = URLComponents(url: base.appendingPathComponent("Sessions"), resolvingAgainstBaseURL: false)
+        comps?.queryItems = [q("activeWithinSeconds", "360")]
+        guard let url = comps?.url else { throw APIError.invalidURL }
+        var req = URLRequest(url: url)
+        req.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        try ensureOK(resp)
+        return try JSONDecoder().decode([SessionInfo].self, from: data)
+    }
+
+    /// Send a transport command (PlayPause / NextTrack / PreviousTrack / Stop / Seek) to another session.
+    func sendPlaystate(sessionId: String, command: String, seekTicks: Int64? = nil) async {
+        var query: [URLQueryItem] = []
+        if let seekTicks { query.append(q("seekPositionTicks", String(seekTicks))) }
+        try? await sendMutation("Sessions/\(sessionId)/Playing/\(command)", method: "POST", query: query)
+    }
+
+    /// Declare this session remote-controllable (required for other devices to send it commands).
+    func postCapabilities() async {
+        guard let base = baseURL else { return }
+        var req = URLRequest(url: base.appendingPathComponent("Sessions/Capabilities/Full"))
+        req.httpMethod = "POST"
+        req.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "PlayableMediaTypes": ["Audio"],
+            "SupportedCommands": ["PlayState", "Play"],
+            "SupportsMediaControl": true,
+            "SupportsPersistentIdentifier": false,
         ])
         _ = try? await URLSession.shared.data(for: req)
+    }
+
+    /// Fetch specific items by id (used to materialise a remote session's queue). Order is NOT
+    /// guaranteed by the server — callers reorder against their id list.
+    func fetchItems(ids: [String]) async throws -> [MediaItem] {
+        guard !ids.isEmpty else { return [] }
+        return try await fetchItems(path: "Items", query: [
+            q("userId", userId),
+            q("Ids", ids.joined(separator: ",")),
+            q("Fields", "PrimaryImageAspectRatio,AlbumArtist,Album,AlbumId,RunTimeTicks"),
+            q("ImageTypeLimit", "1"),
+            q("EnableImageTypes", "Primary"),
+        ])
+    }
+
+    // MARK: - Music videos
+
+    /// All music videos in the library (small collections — fetched once and matched client-side
+    /// against the playing song's artist/title).
+    func fetchMusicVideos() async throws -> [MediaItem] {
+        try await fetchItems(path: "Items", query: [
+            q("userId", userId),
+            q("IncludeItemTypes", "MusicVideo"),
+            q("Recursive", "true"),
+            q("Fields", "PrimaryImageAspectRatio,Artists,RunTimeTicks"),
+            q("ImageTypeLimit", "1"),
+            q("EnableImageTypes", "Primary"),
+        ])
+    }
+
+    /// Direct-play stream URL for a VIDEO item (music videos) — the video counterpart of `streamURL`.
+    func videoStreamURL(for item: MediaItem) -> URL? {
+        guard let base = baseURL else { return nil }
+        var comps = URLComponents(url: base.appendingPathComponent("Videos/\(item.id)/stream"),
+                                  resolvingAgainstBaseURL: false)
+        comps?.queryItems = [q("static", "true"), q("api_key", accessToken)]
+        return comps?.url
+    }
+
+    /// The server's WebSocket endpoint — where remote-control commands arrive.
+    var webSocketURL: URL? {
+        guard let base = baseURL,
+              var comps = URLComponents(url: base.appendingPathComponent("socket"),
+                                        resolvingAgainstBaseURL: false) else { return nil }
+        comps.scheme = (comps.scheme == "https") ? "wss" : "ws"
+        comps.queryItems = [q("api_key", accessToken), q("deviceId", Self.deviceId)]
+        return comps.url
     }
 
     // MARK: - URLs
