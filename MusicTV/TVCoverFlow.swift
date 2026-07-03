@@ -219,19 +219,9 @@ struct TVNowPlayingBug: View {
                         .lineLimit(1)
                 }
             }
-        }
-        .padding(.vertical, 24)
-        .padding(.leading, 24)
-        .padding(.trailing, 44)
-        .background {
-            // Black gradient panel fading to the right, like an old channel lower-third.
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(LinearGradient(colors: [.black.opacity(0.88), .black.opacity(0.30)],
-                                     startPoint: .leading, endPoint: .trailing))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(.white.opacity(0.12), lineWidth: 0.5)
-                )
+            // No panel behind the bug — just a soft text shadow so the caption stays readable
+            // over a bright video frame.
+            .shadow(color: .black.opacity(0.7), radius: 6, y: 2)
         }
     }
 }

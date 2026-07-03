@@ -5,7 +5,7 @@ import UIKit
 #endif
 
 /// Jellyfin REST data layer. Async `URLSession` throughout — no Combine.
-/// Personal single-user app: credentials are baked in, there is no login flow.
+/// Credentials are entered at sign-in and persisted per device — nothing is baked into the app.
 @MainActor
 @Observable
 final class JellyfinClient {

@@ -720,9 +720,9 @@ final class Player {
                 }
                 self.updateNowPlayingElapsed()
                 self.progressTick += 1
-                if self.progressTick % 20 == 0 {                  // ~every 10s
-                    self.reportProgress(paused: false)
-                    self.saveSession()
+                if self.progressTick % 10 == 0 {                  // ~every 5s — keeps the position other
+                    self.reportProgress(paused: false)            // devices see (and transfers resume
+                    self.saveSession()                            // from) fresh
                 }
             }
         }

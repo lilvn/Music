@@ -70,6 +70,31 @@ final class SessionHub {
         remote = nil
     }
 
+    /// App came to the foreground: the OS likely killed the socket while suspended. Re-declare
+    /// capabilities, refresh the session picture NOW (not on the next poll tick), and probe the
+    /// socket — a dead one errors on send and gets reopened immediately instead of after the next
+    /// receive failure + backoff.
+    func foregrounded() {
+        guard let client, client.isAuthenticated else { return }
+        Task {
+            await client.postCapabilities()
+            await refreshSessions()
+        }
+        if let task = socketTask {
+            task.send(.string(#"{"MessageType":"KeepAlive"}"#)) { [weak self] error in
+                guard error != nil else { return }
+                Task { @MainActor [weak self] in
+                    guard let self, self.socketTask === task else { return }
+                    self.socketTask?.cancel(with: .goingAway, reason: nil)
+                    self.socketTask = nil
+                    self.openSocket()
+                }
+            }
+        } else {
+            openSocket()
+        }
+    }
+
     // MARK: - Seeing the other sessions
 
     private func refreshSessions() async {

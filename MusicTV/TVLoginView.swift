@@ -65,3 +65,33 @@ struct TVLoginView: View {
         }
     }
 }
+
+/// TV settings: the connected server, and sign out (clears this device's saved login).
+struct TVSettingsView: View {
+    @Environment(JellyfinClient.self) private var client
+    @Environment(Player.self) private var player
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Server") {
+                    LabeledContent("Address", value: client.serverURL)
+                    LabeledContent("User", value: client.username)
+                }
+                Section {
+                    Button("Sign Out", role: .destructive) {
+                        TVVideoController.shared.exit(audio: player, resumeAudio: false)
+                        player.stop()
+                        client.signOut()
+                        dismiss()
+                    }
+                }
+                Section {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .navigationTitle("Settings")
+        }
+    }
+}

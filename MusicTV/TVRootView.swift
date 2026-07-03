@@ -73,6 +73,7 @@ struct TVHomeView: View {
     @State private var artists: [MediaItem] = []
     @State private var loaded = false
     @State private var route: TVCollection?
+    @State private var showSettings = false
 
     var body: some View {
         NavigationStack {
@@ -112,12 +113,22 @@ struct TVHomeView: View {
                             .scrollClipDisabled()
                         }
                     }
-                    if !loaded { ProgressView().frame(maxWidth: .infinity).padding(60) }
+                    if !loaded {
+                        ProgressView().frame(maxWidth: .infinity).padding(60)
+                    } else {
+                        // Same as the iPhone home: a quiet Settings entry at the very bottom.
+                        Button("Settings") { showSettings = true }
+                            .font(.callout)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 20)
+                            .padding(.bottom, 40)
+                    }
                 }
                 .padding(.horizontal, 60)
             }
             .background { TVBackdrop(item: player.currentItem) }
             .navigationDestination(item: $route) { tvDestination(for: $0) }
+            .sheet(isPresented: $showSettings) { TVSettingsView() }
             .task {
                 guard !loaded else { return }
                 async let feat = client.fetchFeatured(limit: 8)
