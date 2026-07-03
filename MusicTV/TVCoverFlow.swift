@@ -205,44 +205,47 @@ struct TVNowPlayingBug: View {
     private let cover: CGFloat = 128
 
     var body: some View {
-        // Reflective cover + CD (left, with the playhead under it) and track text.
-        HStack(alignment: .top, spacing: 34) {
-            VStack(spacing: 12) {
-                // The mini bar carries its own text, so hide the cover's built-in label.
-                TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
-                            showReflection: true, showLabel: false)
-                // Track length bar, always under the artwork.
-                TVMiniProgress().frame(width: cover)
-            }
-            .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.name)
-                    .font(.caption).fontWeight(.semibold)
-                    .lineLimit(1)
-                if let artistLine, !artistLine.isEmpty {
-                    Text(artistLine).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-                if let albumLine, !albumLine.isEmpty {
-                    Text(albumLine).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-                }
-            }
-            .padding(.top, 8)
-        }
-        .padding(.horizontal, 70)
-        .padding(.bottom, 36)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        // The whole bottom is a black gradient fading UP to clear, covering content behind (a grid, or a
-        // playing video) and fading out around the title. As a full-width BACKGROUND it bleeds evenly to
-        // both physical screen edges — a leading-aligned ZStack child pinned its left edge to the inset.
-        .background(alignment: .bottom) {
+        ZStack(alignment: .bottom) {
+            // The whole bottom is a black gradient fading UP to clear, covering content behind (a grid,
+            // or a playing video) and fading out around the title. Centre-aligned + full width so it
+            // bleeds EVENLY to both physical screen edges AND the bottom; leading-alignment pinned the
+            // left edge to the overscan inset, and a background anchored it to the inset bottom (floated).
             LinearGradient(colors: [.black, .black.opacity(0.9), .clear],
                            startPoint: .bottom, endPoint: .top)
                 .frame(height: 340)
                 .frame(maxWidth: .infinity)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
+
+            // Reflective cover + CD (left, with the playhead under it) and track text.
+            HStack(alignment: .top, spacing: 34) {
+                VStack(spacing: 12) {
+                    // The mini bar carries its own text, so hide the cover's built-in label.
+                    TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
+                                showReflection: true, showLabel: false)
+                    // Track length bar, always under the artwork.
+                    TVMiniProgress().frame(width: cover)
+                }
+                .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.name)
+                        .font(.caption).fontWeight(.semibold)
+                        .lineLimit(1)
+                    if let artistLine, !artistLine.isEmpty {
+                        Text(artistLine).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    if let albumLine, !albumLine.isEmpty {
+                        Text(albumLine).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                    }
+                }
+                .padding(.top, 8)
+            }
+            .padding(.horizontal, 70)
+            .padding(.bottom, 36)
+            .frame(maxWidth: .infinity, alignment: .leading)   // content stays LEFT; gradient stays centred
         }
+        .frame(maxWidth: .infinity, alignment: .bottom)
     }
 }
 
