@@ -32,9 +32,11 @@ struct TVHomeView: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
     @Environment(\.tvOpenNowPlaying) private var openNowPlaying
+    @State private var featured: [MediaItem] = []
     @State private var recentlyAdded: [MediaItem] = []
     @State private var mostPlayed: [MediaItem] = []
     @State private var playlists: [MediaItem] = []
+    @State private var artists: [MediaItem] = []
     @State private var loaded = false
     @State private var route: TVCollection?
 
@@ -42,6 +44,9 @@ struct TVHomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if !featured.isEmpty {
+                        TVShelf(title: "Featured", items: featured) { route = .album($0) }
+                    }
                     if !recentlyAdded.isEmpty {
                         TVShelf(title: "New Releases", items: recentlyAdded) { route = .album($0) }
                     }
@@ -58,20 +63,39 @@ struct TVHomeView: View {
                         TVShelf(title: "Playlists", items: playlists,
                                 subtitle: { _ in "Playlist" }) { route = .playlist($0) }
                     }
+                    if !artists.isEmpty {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Artists").font(.title3).fontWeight(.semibold)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                LazyHStack(alignment: .top, spacing: 40) {
+                                    ForEach(artists) { artist in
+                                        TVArtistCell(artist: artist) { route = .artist(artist) }
+                                            .frame(width: 200)
+                                    }
+                                }
+                                .padding(.vertical, 20)   // room for the focus lift
+                            }
+                            .scrollClipDisabled()
+                        }
+                    }
                     if !loaded { ProgressView().frame(maxWidth: .infinity).padding(60) }
                 }
                 .padding(.horizontal, 60)
             }
             .background { TVBackdrop(item: player.currentItem) }
-            .navigationDestination(item: $route) { TVCollectionDetailView(collection: $0) }
+            .navigationDestination(item: $route) { tvDestination(for: $0) }
             .task {
                 guard !loaded else { return }
+                async let feat = client.fetchFeatured(limit: 8)
                 async let recent = client.fetchRecentlyAdded(limit: 12)
                 async let most = client.fetchMostPlayed(limit: 12)
                 async let lists = client.fetchPlaylists()
+                async let arts = client.fetchArtists(limit: 24)
+                featured = (try? await feat) ?? []
                 recentlyAdded = (try? await recent) ?? []
                 mostPlayed = (try? await most) ?? []
                 playlists = (try? await lists) ?? []
+                artists = (try? await arts) ?? []
                 loaded = true
             }
         }
@@ -99,7 +123,7 @@ struct TVAlbumsView: View {
                 .padding(60)
             }
             .background { TVBackdrop(item: player.currentItem) }
-            .navigationDestination(item: $route) { TVCollectionDetailView(collection: $0) }
+            .navigationDestination(item: $route) { tvDestination(for: $0) }
             .task { if albums.isEmpty { albums = (try? await client.fetchAlbums()) ?? [] } }
         }
     }
@@ -172,7 +196,7 @@ struct TVPlaylistsView: View {
                 .padding(60)
             }
             .background { TVBackdrop(item: player.currentItem) }
-            .navigationDestination(item: $route) { TVCollectionDetailView(collection: $0) }
+            .navigationDestination(item: $route) { tvDestination(for: $0) }
             .task {
                 if playlists.isEmpty { playlists = (try? await client.fetchPlaylists()) ?? [] }
                 await client.refreshFavorites()
@@ -220,7 +244,7 @@ struct TVSearchView: View {
                 .padding(60)
             }
             .background { TVBackdrop(item: player.currentItem) }
-            .navigationDestination(item: $route) { TVCollectionDetailView(collection: $0) }
+            .navigationDestination(item: $route) { tvDestination(for: $0) }
             .searchable(text: $query, prompt: "Artists, Albums, Songs")
             .task(id: query) {
                 let q = query.trimmingCharacters(in: .whitespaces)

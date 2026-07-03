@@ -5,6 +5,7 @@ import SwiftUI
 /// Where a browse card leads. Local to the TV app — the phone's LibraryRoute carries iPhone-only cases.
 enum TVCollection: Hashable {
     case album(MediaItem)
+    case artist(MediaItem)
     case playlist(MediaItem)
     case liked
     case musicVideos
@@ -141,6 +142,36 @@ struct TVBackdrop: View {
             }
         }
         .ignoresSafeArea()
+    }
+}
+
+/// A focusable circular artist cell (avatar + name), for the Home artists shelf.
+struct TVArtistCell: View {
+    @Environment(JellyfinClient.self) private var client
+    let artist: MediaItem
+    let action: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Button(action: action) {
+                LibraryImage(url: client.artworkURL(for: artist, size: 400), maxPixel: 400) {
+                    ZStack {
+                        Color(white: 0.18)
+                        Image(systemName: "music.mic")
+                            .font(.system(size: 40, weight: .light))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .aspectRatio(1, contentMode: .fill)
+                .clipShape(Circle())
+            }
+            .buttonStyle(.borderless)
+            .clipShape(Circle())
+
+            Text(artist.name)
+                .font(.caption)
+                .lineLimit(1)
+        }
     }
 }
 

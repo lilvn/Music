@@ -13,6 +13,7 @@ struct TVCollectionDetailView: View {
     private var headerItem: MediaItem? {
         switch collection {
         case .album(let a): a
+        case .artist(let a): a
         case .playlist(let p): p
         case .liked, .musicVideos: nil
         }
@@ -20,6 +21,7 @@ struct TVCollectionDetailView: View {
     private var title: String {
         switch collection {
         case .album(let a): a.name
+        case .artist(let a): a.name
         case .playlist(let p): p.name
         case .liked: "Liked Songs"
         case .musicVideos: "Music Videos"
@@ -28,6 +30,7 @@ struct TVCollectionDetailView: View {
     private var subtitle: String {
         switch collection {
         case .album(let a): a.albumArtist ?? a.primaryArtist
+        case .artist: "Artist"
         case .playlist: "Playlist"
         case .liked: "\(tracks.count) songs"
         case .musicVideos: "\(tracks.count) videos"
@@ -125,6 +128,7 @@ struct TVCollectionDetailView: View {
     private func load() async {
         switch collection {
         case .album(let a):    tracks = (try? await client.fetchAlbumTracks(albumId: a.id)) ?? []
+        case .artist(let a):   tracks = (try? await client.fetchArtistSongs(artistId: a.id)) ?? []
         case .playlist(let p): tracks = (try? await client.fetchPlaylistItems(playlistId: p.id)) ?? []
         case .musicVideos:
             await TVVideoController.shared.loadLibrary(client: client)
@@ -141,5 +145,86 @@ struct TVCollectionDetailView: View {
             }.map(\.element)
         }
         isLoading = false
+    }
+}
+
+// MARK: - Artist detail (avatar + albums grid)
+
+/// Routes a TVCollection to the right detail — artists get the albums grid, everything else the
+/// two-pane tracklist.
+@ViewBuilder
+func tvDestination(for collection: TVCollection) -> some View {
+    if case .artist(let artist) = collection {
+        TVArtistDetailView(artist: artist)
+    } else {
+        TVCollectionDetailView(collection: collection)
+    }
+}
+
+struct TVArtistDetailView: View {
+    @Environment(JellyfinClient.self) private var client
+    @Environment(Player.self) private var player
+    @Environment(\.tvOpenNowPlaying) private var openNowPlaying
+    let artist: MediaItem
+    @State private var albums: [MediaItem] = []
+    @State private var isLoading = true
+    @State private var route: TVCollection?
+
+    private let cols = [GridItem(.adaptive(minimum: 260, maximum: 320), spacing: 48)]
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 36) {
+                // Header: circular avatar + name + play-all.
+                VStack(spacing: 18) {
+                    LibraryImage(url: client.artworkURL(for: artist, size: 600), maxPixel: 600) {
+                        ZStack {
+                            Color(white: 0.18)
+                            Image(systemName: "music.mic")
+                                .font(.system(size: 64, weight: .light))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(width: 300, height: 300)
+                    .clipShape(Circle())
+                    .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
+
+                    Text(artist.name)
+                        .font(.title3).fontWeight(.bold)
+
+                    HStack(spacing: 20) {
+                        Button { playAll(shuffled: false) } label: { Label("Play", systemImage: "play.fill") }
+                        Button { playAll(shuffled: true) } label: { Label("Shuffle", systemImage: "shuffle") }
+                    }
+                }
+                .padding(.top, 20)
+
+                if isLoading {
+                    ProgressView().padding(40)
+                } else if !albums.isEmpty {
+                    LazyVGrid(columns: cols, spacing: 48) {
+                        ForEach(albums) { album in
+                            TVCoverCell(item: album) { route = .album(album) }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 60)
+        }
+        .background { TVBackdrop(item: artist) }
+        .navigationDestination(item: $route) { tvDestination(for: $0) }
+        .task {
+            albums = (try? await client.fetchAlbums(artistId: artist.id)) ?? []
+            isLoading = false
+        }
+    }
+
+    private func playAll(shuffled: Bool) {
+        Task {
+            let songs = (try? await client.fetchArtistSongs(artistId: artist.id)) ?? []
+            guard !songs.isEmpty else { return }
+            player.play(items: songs, from: 0, shuffled: shuffled)
+            openNowPlaying()
+        }
     }
 }
