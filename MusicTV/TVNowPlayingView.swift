@@ -15,6 +15,11 @@ struct TVNowPlayingView: View {
     private var videoCtl: TVVideoController { TVVideoController.shared }
     private var inVideoMode: Bool { videoCtl.activeVideo != nil }
 
+    // The top tab bar auto-hides after a few idle seconds and returns on ANY remote input, so it's
+    // never permanently gone (the old force-hide trapped you with no way back).
+    @State private var chromeHidden = false
+    @State private var idle: Task<Void, Never>?
+
     var body: some View {
         ZStack {
             // ----- Backdrop: the music video, or the artwork wash -----
@@ -34,7 +39,7 @@ struct TVNowPlayingView: View {
                 // ----- The skeuomorphic centrepiece: cover + CD + reflection, playhead below. Lifted
                 // above the bottom mini-bar band so the track sits in the middle. -----
                 VStack(spacing: 8) {
-                    TVNowPlayingArtwork(coverSize: 400)
+                    TVNowPlayingArtwork(coverSize: 400, onInteract: resetIdle)
                     progressBar
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -55,16 +60,20 @@ struct TVNowPlayingView: View {
                 }
             }
         }
-        .toolbar(.hidden, for: .tabBar)   // hide the top tab bar on Now Playing (swipe up to reveal)
+        .toolbar(chromeHidden ? .hidden : .automatic, for: .tabBar)   // hides on idle, back on any input
+        .onAppear(perform: resetIdle)
+        .onDisappear { idle?.cancel(); chromeHidden = false }
         // Siri Remote play/pause: the direct playlist toggles the video (it's the sound); everything
         // else toggles the audio Player (a matched backdrop follows via setPlaying).
         .onPlayPauseCommand {
+            resetIdle()
             videoCtl.direct ? videoCtl.togglePlayPause() : player.togglePlayPause()
         }
         // Video mode: the screen itself takes focus so trackpad swipes skip — between playlist videos
         // (direct) or between queue tracks (matched).
         .focusable(inVideoMode)
         .onMoveCommand { direction in
+            resetIdle()
             guard inVideoMode else { return }
             let delta: Int
             switch direction {
@@ -82,6 +91,17 @@ struct TVNowPlayingView: View {
         // NOTE: video mode is owned by the APP ROOT (MusicTVApp evaluates on track/play changes), not
         // this view — so the video keeps playing in the background when you browse other pages. This
         // view only renders the current state; the fullscreen layer reattaches when you come back.
+    }
+
+    /// Show the tab bar and restart the 5-second idle countdown. Called on appear and on every remote
+    /// input (move, play/pause, and the carousel's own swipes) so the bar is always one press away.
+    private func resetIdle() {
+        chromeHidden = false
+        idle?.cancel()
+        idle = Task {
+            try? await Task.sleep(for: .seconds(5))
+            if !Task.isCancelled { chromeHidden = true }
+        }
     }
 
     // MARK: - Chrome (minimal liquid glass)

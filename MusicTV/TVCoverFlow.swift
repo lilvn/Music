@@ -212,6 +212,7 @@ struct TVNowPlayingBug: View {
                            startPoint: .bottom, endPoint: .top)
                 .frame(height: 340)
                 .frame(maxWidth: .infinity)
+                .ignoresSafeArea()          // reach the physical screen edges, past the tvOS overscan inset
                 .allowsHitTesting(false)
 
             // Reflective cover + CD (left, with the playhead under it) and track text, pinned to bottom.
@@ -225,18 +226,18 @@ struct TVNowPlayingBug: View {
                 }
                 .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(item.name)
-                        .font(.title3).fontWeight(.semibold)
+                        .font(.caption).fontWeight(.semibold)
                         .lineLimit(1)
                     if let artistLine, !artistLine.isEmpty {
-                        Text(artistLine).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                        Text(artistLine).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
                     if let albumLine, !albumLine.isEmpty {
-                        Text(albumLine).font(.callout).foregroundStyle(.tertiary).lineLimit(1)
+                        Text(albumLine).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                     }
                 }
-                .padding(.top, 6)
+                .padding(.top, 8)
             }
             .padding(.horizontal, 70)
             .padding(.bottom, 36)
@@ -272,6 +273,8 @@ private struct TVMiniProgress: View {
 struct TVNowPlayingArtwork: View {
     @Environment(Player.self) private var player
     let coverSize: CGFloat
+    /// Called on any remote input here so the parent can keep the tab bar's idle timer alive.
+    var onInteract: () -> Void = {}
     @FocusState private var focused: Bool
 
     // ---- Track-change choreography -------------------------------------------------------------
@@ -313,6 +316,7 @@ struct TVNowPlayingArtwork: View {
         .focused($focused)
         .scaleEffect(focused ? 1.02 : 1.0)   // breathes subtly when the remote is on it
         .onMoveCommand { direction in
+            onInteract()
             switch direction {
             case .left:  step(-1)
             case .right: step(+1)
@@ -322,7 +326,7 @@ struct TVNowPlayingArtwork: View {
                 break
             }
         }
-        .onTapGesture { player.togglePlayPause() }   // remote click = play/pause
+        .onTapGesture { onInteract(); player.togglePlayPause() }   // remote click = play/pause
         // The track changed underneath us (natural end, remote command, another device): the retract
         // already happened via `nearEnd` — commit it and pop the new CD once the swap settles.
         .onChange(of: player.queue.currentIndex) { _, _ in
