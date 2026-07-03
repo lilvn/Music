@@ -82,7 +82,12 @@ final class TVVideoController {
     }
 
     private func showBackdrop(_ video: MediaItem, client: JellyfinClient, playing: Bool) {
-        if activeVideo?.id == video.id {                     // same video → just sync play state
+        if activeVideo?.id == video.id {
+            // The videos are named per-ARTIST, so every track on an artist's album matches the SAME
+            // video. showBackdrop is only re-entered here on a real track change, so restart the clip
+            // from the top — otherwise it drones on from the middle of the previous song ("the video
+            // keeps playing even when the song is over").
+            avPlayer?.seek(to: .zero)
             playing ? avPlayer?.play() : avPlayer?.pause()
             return
         }
