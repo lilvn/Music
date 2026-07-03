@@ -23,15 +23,29 @@ extension EnvironmentValues {
     }
 }
 
-/// Artwork placeholder for items with no cover — mirrors the phone's dark panel look.
+/// Artwork placeholder for items with no cover — the SAME art as the phone (Components.swift's
+/// ArtworkPlaceholder): a subtle dark panel with the custom heart-speaker mark, sized relative to
+/// the panel so it reads correctly from a row thumbnail up to the Now Playing centrepiece.
 struct TVPlaceholder: View {
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [Color(white: 0.22), Color(white: 0.12)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-            Image(systemName: "music.note")
-                .font(.system(size: 48, weight: .light))
-                .foregroundStyle(.white.opacity(0.35))
+        GeometryReader { geo in
+            let s = min(geo.size.width, geo.size.height)
+            ZStack {
+                LinearGradient(colors: [Color(white: 0.22), Color(white: 0.12)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                if let mark = UIImage(named: "ArtworkPlaceholder") {
+                    Image(uiImage: mark)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: max(s * 0.12, 14), height: max(s * 0.12, 14))
+                        .opacity(0.9)
+                } else {
+                    Image(systemName: "music.note")
+                        .font(.system(size: s * 0.26, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.32))
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 }
