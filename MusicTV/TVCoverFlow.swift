@@ -202,19 +202,25 @@ struct TVNowPlayingBug: View {
     var albumLine: String? = nil
     var spinning = true
 
+    @Environment(Player.self) private var player
     private let cover: CGFloat = 104
+    @State private var width: CGFloat = 1
+
+    /// 0…1 playhead for the current track — the audio Player (normal + matched-video) or the direct
+    /// video. Drives the fill, exactly like the iPhone mini bar.
+    private var progress: Double {
+        let ctl = TVVideoController.shared
+        if ctl.direct { return ctl.directProgress }
+        return player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0
+    }
 
     var body: some View {
-        // A compact Liquid Glass shelf: cover + CD + playhead on the left, track text on the right.
-        HStack(alignment: .top, spacing: 26) {
-            VStack(spacing: 10) {
-                // The shelf carries its own text, so hide the cover's built-in label.
-                TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
-                            showReflection: false, showLabel: false)
-                // Track length bar, always under the artwork.
-                TVMiniProgress().frame(width: cover)
-            }
-            .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
+        // A compact Liquid Glass shelf: cover + CD on the left, track text on the right.
+        HStack(alignment: .center, spacing: 26) {
+            // The shelf carries its own text, so hide the cover's built-in label.
+            TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
+                        showReflection: false, showLabel: false)
+                .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.name)
@@ -227,26 +233,45 @@ struct TVNowPlayingBug: View {
                     Text(albumLine).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                 }
             }
-            .padding(.top, 6)
             .frame(maxWidth: 320, alignment: .leading)
         }
         .padding(22)
+        // Progress FILL, like the iPhone mini bar: the artwork blurred into a wash, revealed left→right
+        // across the shelf as the track plays.
+        .background(alignment: .leading) {
+            TVArtworkFill(item: item)
+                .frame(width: width)
+                .frame(maxHeight: .infinity)
+                .mask(alignment: .leading) {
+                    Rectangle()
+                        .frame(width: max(0, width * progress))
+                        .animation(.linear(duration: 0.5), value: progress)
+                }
+                .allowsHitTesting(false)
+        }
+        // Single instance (not a grid cell), so this GeometryReader is safe — it just reads the shelf's
+        // width for the fill mask.
+        .background {
+            GeometryReader { g in
+                Color.clear.onChange(of: g.size.width, initial: true) { _, w in width = w }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .glassEffect(.regular, in: .rect(cornerRadius: 28))
     }
 }
 
-/// The current track's playhead for the mini bar. Reads the audio Player (normal + matched-video
-/// modes) or the video controller (direct playlist mode). A tiny standalone view so only IT re-renders
-/// as the time ticks — not the whole band / tab view.
-private struct TVMiniProgress: View {
-    @Environment(Player.self) private var player
+/// A blurred wash of the artwork — the tvOS stand-in for the iPhone's ArtworkGradient (iOS-only). Fills
+/// the mini shelf left→right to show progress.
+private struct TVArtworkFill: View {
+    @Environment(JellyfinClient.self) private var client
+    let item: MediaItem
     var body: some View {
-        let ctl = TVVideoController.shared
-        let frac = ctl.direct
-            ? ctl.directProgress
-            : (player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0)
-        ProgressView(value: frac)
-            .tint(.white)
+        LibraryImage(url: client.artworkURL(for: item, size: 160), maxPixel: 160) { Color(white: 0.2) }
+            .aspectRatio(contentMode: .fill)
+            .blur(radius: 30, opaque: true)
+            .saturation(1.4)
+            .overlay(Color.black.opacity(0.28))   // tone it down so the white text stays legible
     }
 }
 
