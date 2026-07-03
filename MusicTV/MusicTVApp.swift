@@ -26,10 +26,20 @@ struct MusicTVApp: App {
             .task {
                 AudioStore.shared.attach(client)
                 SessionHub.shared.start(client: client, player: player)
+                if client.isAuthenticated { await TVVideoController.shared.loadLibrary(client: client) }
             }
             .onChange(of: client.userId) { _, newUserId in
                 player.userDidChange(to: newUserId)
                 SessionHub.shared.restart()
+            }
+            // TV rule: a track with a library music video NEVER plays its regular audio — the video is
+            // the playback, on every page. Evaluated at the root so it holds app-wide: on track change,
+            // and when audio starts (so pressing play on a matched track swaps to its video too).
+            .onChange(of: player.currentItem?.id) { _, _ in
+                TVVideoController.shared.evaluate(client: client, audio: player)
+            }
+            .onChange(of: player.isPlaying) { _, playing in
+                if playing { TVVideoController.shared.evaluate(client: client, audio: player) }
             }
         }
     }

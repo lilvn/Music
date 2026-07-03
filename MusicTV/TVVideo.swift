@@ -50,9 +50,35 @@ final class TVVideoController {
         }
     }
 
+    /// App-wide rule for the TV: a matched track NEVER plays its regular audio — the video is the
+    /// playback. Called whenever the current track (or play state) changes, from the app root, so it
+    /// applies on every page, not just Now Playing.
+    func evaluate(client: JellyfinClient, audio: Player) {
+        guard !direct else { return }                    // the Music Videos playlist drives itself
+        guard let song = audio.currentItem else {
+            if activeVideo != nil { exit(audio: audio, resumeAudio: false) }
+            return
+        }
+        if let video = videoMatching(song) {
+            enter(video: video, client: client, audio: audio)
+        } else if activeVideo != nil {
+            exit(audio: audio, resumeAudio: true)        // left video territory → audio takes over
+        }
+    }
+
     /// Switch playback to `video`: pause the audio queue, play the video with its own audio.
     func enter(video: MediaItem, client: JellyfinClient, audio: Player) {
-        guard activeVideo?.id != video.id else { return }
+        if activeVideo?.id == video.id {
+            // Same video (e.g. the next track is by the same artist, or an audio-resume blip snuck
+            // in): kill any audio, and restart the video only if it actually finished.
+            audio.pause()
+            if let av = avPlayer, let d = av.currentItem?.duration.seconds, d.isFinite,
+               av.currentTime().seconds >= d - 0.5 {
+                av.seek(to: .zero)
+                av.playImmediately(atRate: 1)
+            }
+            return
+        }
         guard let url = client.videoStreamURL(for: video) else { return }
         audio.pause()
         stopVideo()
@@ -72,12 +98,11 @@ final class TVVideoController {
                     // Playing the Music Videos playlist — roll straight into the next video.
                     ctl.advanceDirect(by: 1)
                 } else {
-                    // Matched video finished → move the audio queue along; Now Playing re-evaluates
-                    // the new track (next video, or back to audio).
-                    ctl.stopVideo()
-                    ctl.activeVideo = nil
+                    // Matched video finished → advance the queue. The app-root evaluator decides what
+                    // the new track means: another video (or this one again), or back to audio. Keep
+                    // video mode "open" meanwhile so no stray audio leaks between tracks.
                     Player.shared.nextTrack()
-                    Player.shared.resume()
+                    TVVideoController.shared.evaluate(client: JellyfinClient.shared, audio: Player.shared)
                 }
             }
         }

@@ -28,12 +28,19 @@ struct TVRootView: View {
         .overlay(alignment: .bottomLeading) {
             if tab != .nowPlaying {
                 Group {
-                    if let item = player.currentItem {
+                    if TVVideoController.shared.direct, let video = TVVideoController.shared.activeVideo {
+                        // The Music Videos playlist keeps playing behind the browse UI.
+                        Button { tab = .nowPlaying } label: {
+                            TVNowPlayingBug(item: video,
+                                            artistLine: video.primaryArtist,
+                                            spinning: true)
+                        }
+                    } else if let item = player.currentItem {
                         Button { tab = .nowPlaying } label: {
                             TVNowPlayingBug(item: item,
                                             artistLine: item.primaryArtist,
                                             albumLine: item.album,
-                                            spinning: player.isPlaying)
+                                            spinning: player.isPlaying || TVVideoController.shared.activeVideo != nil)
                         }
                     } else if let remote = SessionHub.shared.remote {
                         Button { tab = .nowPlaying } label: {

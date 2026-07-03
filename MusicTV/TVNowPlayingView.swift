@@ -84,35 +84,9 @@ struct TVNowPlayingView: View {
                 if player.queue.items.indices.contains(next) { player.play(at: next) }
             }
         }
-        .task {
-            await videoCtl.loadLibrary(client: client)
-            reevaluateVideo()   // the library may load AFTER onAppear's evaluation — re-check
-        }
-        // The current track changed (carousel click, queue advance, video ended) — switch between
-        // audio and video presentation to match it.
-        .onChange(of: player.currentItem?.id) { _, _ in reevaluateVideo() }
-        .onAppear { reevaluateVideo() }
-        // Leaving Now Playing hands playback back to the audio queue (a direct video playlist just
-        // stops — don't blast paused audio at someone who was watching videos).
-        .onDisappear {
-            videoCtl.exit(audio: player, resumeAudio: player.currentItem != nil && !videoCtl.direct)
-        }
-    }
-
-    /// Enter video mode when the current song has a library music video; exit (resuming audio) when
-    /// it doesn't. Direct playback (the Music Videos playlist) is driven by the controller, not the
-    /// audio queue — leave it alone.
-    private func reevaluateVideo() {
-        guard !videoCtl.direct else { return }
-        guard let song = player.currentItem else {
-            videoCtl.exit(audio: player, resumeAudio: false)
-            return
-        }
-        if let video = videoCtl.videoMatching(song) {
-            videoCtl.enter(video: video, client: client, audio: player)
-        } else {
-            videoCtl.exit(audio: player, resumeAudio: true)
-        }
+        // NOTE: video mode is owned by the APP ROOT (MusicTVApp evaluates on track/play changes), not
+        // this view — so the video keeps playing in the background when you browse other pages. This
+        // view only renders the current state; the fullscreen layer reattaches when you come back.
     }
 
     // MARK: - Video "channel bug" (bottom-left, old-school music-video-channel style)
