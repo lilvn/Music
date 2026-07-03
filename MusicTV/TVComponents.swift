@@ -28,24 +28,19 @@ extension EnvironmentValues {
 /// the panel so it reads correctly from a row thumbnail up to the Now Playing centrepiece.
 struct TVPlaceholder: View {
     var body: some View {
-        GeometryReader { geo in
-            let s = min(geo.size.width, geo.size.height)
-            ZStack {
-                LinearGradient(colors: [Color(white: 0.22), Color(white: 0.12)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                if let mark = UIImage(named: "ArtworkPlaceholder") {
-                    Image(uiImage: mark)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: max(s * 0.12, 14), height: max(s * 0.12, 14))
-                        .opacity(0.9)
-                } else {
-                    Image(systemName: "music.note")
-                        .font(.system(size: s * 0.26, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.32))
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
+        ZStack {
+            LinearGradient(colors: [Color(white: 0.22), Color(white: 0.12)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            // The heart-speaker mark, scaled to ~40% of the tile. Uses scaleEffect (a render transform),
+            // NOT a GeometryReader — a GeometryReader here (rendered by every cover on Home, inside an
+            // .aspectRatio) drove a DynamicLayoutComputer / _AspectRatioLayout churn that crashed
+            // SwiftUI's layout on launch. This scales with any tile size without measuring it.
+            Image("ArtworkPlaceholder")
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .scaleEffect(0.4)
+                .opacity(0.9)
         }
     }
 }
