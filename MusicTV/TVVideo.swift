@@ -62,9 +62,12 @@ final class TVVideoController {
     /// timeline and scrobbling stay completely normal ("treat it like a normal track"); the matched
     /// video is a muted, looping VISUAL only. Called on every track / play-state change from the root.
     func evaluate(client: JellyfinClient, audio: Player) {
-        guard !direct else { return }                        // the Music Videos playlist drives itself
         self.client = client
         self.audio = audio
+        // The audio queue changed while the Music Videos PLAYLIST was on screen — that only happens
+        // when you start a real track (an album, a song). Leave the playlist so its video doesn't keep
+        // running underneath the new song.
+        if direct { exit(audio: audio, resumeAudio: false) }
         guard let song = audio.currentItem, let video = videoMatching(song) else {
             clearBackdrop()                                  // no video for this track → plain audio NP
             return

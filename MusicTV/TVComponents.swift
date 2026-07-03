@@ -53,10 +53,11 @@ struct TVPlaceholder: View {
     }
 }
 
-/// A focusable square cover card (album / playlist) with its labels below. The `.card` (now `.borderless`
-/// on tvOS 18+) button style gives the system focus lift + specular sheen.
+/// A focusable square cover card (album / playlist) with its labels below. Focus lifts the WHOLE tile
+/// with a render-only scale — `.borderless`/`.card` zoomed the picture *inside* its fixed frame instead.
 struct TVCoverCard: View {
     @Environment(JellyfinClient.self) private var client
+    @FocusState private var focused: Bool
     let item: MediaItem
     var subtitle: String? = nil
     let action: () -> Void
@@ -71,8 +72,11 @@ struct TVCoverCard: View {
             // coverless album isn't a square tile among rounded ones.
             .clipShape(RoundedRectangle(cornerRadius: TVDS.cover, style: .continuous))
         }
-        .buttonStyle(.borderless)
-        // Labels live OUTSIDE the button so the focus lift only scales the artwork.
+        .buttonStyle(.plain)
+        .focused($focused)
+        .scaleEffect(focused ? 1.08 : 1.0)   // render transform (no layout measurement — launch-crash safe)
+        .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 22 : 0, y: focused ? 14 : 0)
+        .animation(.easeOut(duration: 0.18), value: focused)
         .accessibilityLabel(item.name)
     }
 }
@@ -166,6 +170,7 @@ struct TVBackdrop: View {
 /// A focusable circular artist cell (avatar + name), for the Home artists shelf.
 struct TVArtistCell: View {
     @Environment(JellyfinClient.self) private var client
+    @FocusState private var focused: Bool
     let artist: MediaItem
     let action: () -> Void
 
@@ -183,8 +188,11 @@ struct TVArtistCell: View {
                 .aspectRatio(1, contentMode: .fill)
                 .clipShape(Circle())
             }
-            .buttonStyle(.borderless)
-            .clipShape(Circle())
+            .buttonStyle(.plain)
+            .focused($focused)
+            .scaleEffect(focused ? 1.08 : 1.0)   // lift the whole avatar, not the photo inside it
+            .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 20 : 0, y: focused ? 12 : 0)
+            .animation(.easeOut(duration: 0.18), value: focused)
 
             Text(artist.name)
                 .font(.caption)
