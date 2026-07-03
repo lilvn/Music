@@ -54,7 +54,10 @@ struct TVRootView: View {
                 .buttonStyle(.borderless)
                 .padding(.leading, 70)
                 .padding(.bottom, 60)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                // NO transition here: this conditional flips when SessionHub's first poll lands
+                // (~0.5s after launch) — a transition on a root-level conditional being
+                // inserted/removed mid-layout is exactly what tripped SwiftUI's
+                // DynamicContainerInfo.tryRemovingItem assertion (flaky launch crash).
             }
         }
     }
@@ -102,7 +105,7 @@ struct TVHomeView: View {
                         VStack(alignment: .leading, spacing: 16) {
                             Text("Artists").font(.title3).fontWeight(.semibold)
                             ScrollView(.horizontal, showsIndicators: false) {
-                                LazyHStack(alignment: .top, spacing: 40) {
+                                HStack(alignment: .top, spacing: 40) {
                                     ForEach(artists) { artist in
                                         TVArtistCell(artist: artist) { route = .artist(artist) }
                                             .frame(width: 200)
@@ -136,11 +139,19 @@ struct TVHomeView: View {
                 async let most = client.fetchMostPlayed(limit: 12)
                 async let lists = client.fetchPlaylists()
                 async let arts = client.fetchArtists(limit: 24)
-                featured = (try? await feat) ?? []
-                recentlyAdded = (try? await recent) ?? []
-                mostPlayed = (try? await most) ?? []
-                playlists = (try? await lists) ?? []
-                artists = (try? await arts) ?? []
+                // Gather everything FIRST, then commit in one mutation: six staggered state flips
+                // (plus the spinner's removal) landing mid-first-layout tripped SwiftUI's
+                // DynamicContainerInfo.tryRemovingItem assert (the flaky launch crash on Home).
+                let f = (try? await feat) ?? []
+                let r = (try? await recent) ?? []
+                let m = (try? await most) ?? []
+                let p = (try? await lists) ?? []
+                let a = (try? await arts) ?? []
+                featured = f
+                recentlyAdded = r
+                mostPlayed = m
+                playlists = p
+                artists = a
                 loaded = true
             }
         }

@@ -56,6 +56,9 @@ final class SessionHub {
         Task { await client.postCapabilities() }
         openSocket()
         pollTask = Task { [weak self] in
+            // Let the first layout settle before the first poll can flip `remote` (and with it the
+            // mini-bar/transfer UI) — a state flip landing mid-first-layout is crash bait on tvOS.
+            try? await Task.sleep(for: .seconds(2))
             while !Task.isCancelled {
                 await self?.refreshSessions()
                 try? await Task.sleep(for: .seconds(5))

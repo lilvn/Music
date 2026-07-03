@@ -200,7 +200,7 @@ struct TVShelf: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title).font(.title3).fontWeight(.semibold)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 40) {
+                HStack(alignment: .top, spacing: 40) {
                     ForEach(items) { item in
                         TVCoverCell(item: item, subtitle: subtitle?(item), action: { action(item) })
                             .frame(width: 260)

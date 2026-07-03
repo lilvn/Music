@@ -19,17 +19,13 @@ struct TVLoginView: View {
             Text("Sign In to Jellyfin")
                 .font(.title2).fontWeight(.bold)
 
+            // Deliberately bare fields: on tvOS 26 the input-trait modifiers (textContentType /
+            // autocapitalization / autocorrection) on these fields triggered an AttributeGraph cycle
+            // and a DynamicContainer fatal on first layout — the app crashed ON the sign-in screen.
             VStack(spacing: 20) {
                 TextField("Server address", text: $server)
-                    .textContentType(.URL)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
                 TextField("Username", text: $username)
-                    .textContentType(.username)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
                 SecureField("Password", text: $password)
-                    .textContentType(.password)
             }
             .frame(maxWidth: 800)
 
@@ -45,7 +41,6 @@ struct TVLoginView: View {
             .disabled(!canSubmit || isLoading)
         }
         .padding(60)
-        .disabled(isLoading)
     }
 
     private func login() {
