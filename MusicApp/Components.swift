@@ -241,6 +241,10 @@ private struct FadingDetailHeader<Trailing: View>: ViewModifier {
         content
             .safeAreaInset(edge: .top, spacing: 0) { bar }   // a custom nav bar that reserves its own space
             .toolbar(.hidden, for: .navigationBar)   // no system bar — we draw our own, so opacity animates
+            // `.toolbar(.hidden)` alone doesn't suppress the system back button when the parent stack is
+            // `.searchable` (the Search tab) — so the album/artist/playlist showed TWO back buttons when
+            // opened from Search. Hide it explicitly so only our custom glass button remains, everywhere.
+            .navigationBarBackButtonHidden(true)
         // Recognise the left-edge back-swipe ourselves and route it through the SAME close() as the tap,
         // so the buttons fade out identically whether you tap or swipe.
         .simultaneousGesture(

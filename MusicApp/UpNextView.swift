@@ -67,10 +67,10 @@ struct UpNextView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.hidden)
-                // Glass highlight glides between rows; list insertions/removals fade.
+                // Glass highlight glides when the playing track changes. (No implicit count animations
+                // here — they made drag-reorder drops settle with a slow ease that fought the gesture;
+                // the List animates its own row insert/remove/move.)
                 .animation(.spring(response: 0.4, dampingFraction: 0.82), value: player.queue.currentIndex)
-                .animation(.easeInOut(duration: 0.35), value: player.queue.items.count)
-                .animation(.easeInOut(duration: 0.35), value: player.autoplayTracks.count)
                 .task { await player.refreshAutoplay() }
                 .onAppear {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -113,12 +113,15 @@ struct UpNextView: View {
                 .listRowInsets(EdgeInsets(top: 18, leading: 20, bottom: 8, trailing: 20))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
+                .moveDisabled(true)   // the divider is a fixed marker — never draggable
         case .track(let item, let autoplay, let index, _):
+            let isCurrent = !autoplay && index == player.queue.currentIndex
             trackRow(item: item, autoplay: autoplay, index: index)
                 .opacity(autoplay ? 0.9 : 1)
                 .listRowInsets(EdgeInsets(top: 6, leading: 20, bottom: 6, trailing: 20))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
+                .moveDisabled(isCurrent)   // the playing track stays put (no forced snap-back)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     if autoplay { player.playAutoplayFrom(index) } else { player.play(at: index) }
