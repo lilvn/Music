@@ -202,10 +202,10 @@ extension View {
         shadow(color: .black.opacity(0.25), radius: 11, y: 7)
     }
 
-    /// The standard system navigation back button on a transparent bar (so the artwork gradient shows
-    /// through). The system positions it, so it stays consistent everywhere — including detail views
-    /// pushed from the Search tab. Optionally takes trailing header content (e.g. a "+"), placed as a
-    /// toolbar item.
+    /// A liquid-glass back button (plus optional trailing header content, e.g. a "+") rendered in a real
+    /// view bar — NOT the system toolbar — so its opacity actually animates: it fades out on close exactly
+    /// the way it fades in. The bar reserves its own space at the top (a custom nav bar) and keeps the
+    /// edge swipe-to-go-back.
     func fadingDetailHeader() -> some View {
         modifier(FadingDetailHeader(trailing: EmptyView()))
     }
@@ -231,17 +231,57 @@ struct GlassCircleButton<Label: View>: View {
 }
 
 private struct FadingDetailHeader<Trailing: View>: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+    @State private var visible = false
+    @State private var closing = false
+
     let trailing: Trailing
 
     func body(content: Content) -> some View {
         content
-            // Use the STANDARD system navigation back button. The system positions it consistently in
-            // every context — the library tabs AND the Search stack — so detail views look identical no
-            // matter where they're opened from (a custom header couldn't collapse the Search tab's top
-            // chrome). A transparent bar keeps the artwork gradient showing through behind it, and the
-            // system provides edge-swipe-to-go-back for free.
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { trailing } }
+            .safeAreaInset(edge: .top, spacing: 0) { bar }   // a custom nav bar that reserves its own space
+            .toolbar(.hidden, for: .navigationBar)   // no system bar — we draw our own, so opacity animates
+            // `.toolbar(.hidden)` alone doesn't suppress the system back button when the parent stack is
+            // `.searchable` (the Search tab) — so the album/artist/playlist showed TWO back buttons when
+            // opened from Search. Hide it explicitly so only our custom glass button remains, everywhere.
+            .navigationBarBackButtonHidden(true)
+        // Recognise the left-edge back-swipe ourselves and route it through the SAME close() as the tap,
+        // so the buttons fade out identically whether you tap or swipe.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 18)
+                .onChanged { v in
+                    guard !closing,
+                          v.startLocation.x < 32,
+                          v.translation.width > 70,
+                          abs(v.translation.height) < 60 else { return }
+                    close()
+                }
+        )
+        .onAppear { withAnimation(.easeOut(duration: 0.3)) { visible = true } }
+    }
+
+    private var bar: some View {
+        HStack(spacing: 0) {
+            GlassCircleButton(action: close) {
+                Image(systemName: "chevron.backward")
+                    .font(.title3.weight(.semibold)).foregroundStyle(.primary)
+            }
+            .accessibilityLabel("Back")
+            Spacer(minLength: 0)
+            trailing
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .opacity(visible ? 1 : 0)   // a real view, so this fades reliably in BOTH directions
+    }
+
+    /// Fade the header out AND pop at the same time, so the buttons fade as the view zooms away — one
+    /// smooth motion. (The old fade-then-dismiss-in-completion sequence read as janky and was race-prone.)
+    private func close() {
+        guard !closing else { return }
+        closing = true
+        withAnimation(.easeOut(duration: 0.2)) { visible = false }
+        dismiss()
     }
 }
 

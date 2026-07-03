@@ -290,10 +290,12 @@ struct PlaylistDetailView: View {
         .scrollIndicators(.hidden)
         // (highlight animation lives on the row itself — see SongRow — so it never reaches the nav bar)
         .navigationBarTitleDisplayMode(.inline)
-        // "+" (Add Music) as a native toolbar item, matching the system back button.
+        // Back button + the "+" (Add Music) both fade out together on close.
         .fadingDetailHeader {
-            Button { showAddMusic = true } label: {
-                Image(systemName: "plus").fontWeight(.semibold)
+            GlassCircleButton(action: { showAddMusic = true }) {
+                Image(systemName: "plus")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
             }
         }
         .sheet(isPresented: $showAddMusic, onDismiss: { Task { await reload() } }) {
