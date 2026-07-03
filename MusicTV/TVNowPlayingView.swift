@@ -122,44 +122,15 @@ struct TVNowPlayingView: View {
         videoCtl.direct ? videoCtl.activeVideo : player.currentItem
     }
 
-    /// Small cover + CD in the corner over a black gradient panel, with track / artist / album to the
-    /// right — the way skeuomorphic music-video channels captioned what was on.
+    /// The shared channel bug, captioned for whatever the video is playing.
     private var videoCornerBug: some View {
-        HStack(spacing: 28) {
+        Group {
             if let bugItem {
-                TVFlowCover(item: bugItem, size: 150,
-                            discOut: true, spinning: true, showReflection: false)
-                    .padding(.trailing, 26)   // room for the slid-out disc
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(bugItem.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text(bugItem.primaryArtist)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    if let album = bugItem.album, !album.isEmpty {
-                        Text(album)
-                            .font(.callout)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                }
+                TVNowPlayingBug(item: bugItem,
+                                artistLine: bugItem.primaryArtist,
+                                albumLine: bugItem.album,
+                                spinning: true)
             }
-        }
-        .padding(.vertical, 24)
-        .padding(.leading, 24)
-        .padding(.trailing, 44)
-        .background {
-            // Black gradient panel fading to the right, like an old channel lower-third.
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(LinearGradient(colors: [.black.opacity(0.88), .black.opacity(0.30)],
-                                     startPoint: .leading, endPoint: .trailing))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(.white.opacity(0.12), lineWidth: 0.5)
-                )
         }
     }
 

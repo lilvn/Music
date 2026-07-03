@@ -185,6 +185,57 @@ struct TVFlowCover: View {
     }
 }
 
+// MARK: - Corner "channel bug" (the TV's mini bar)
+
+/// Small cover + slid-out CD over a black gradient lower-third panel with text to the right — the
+/// skeuomorphic music-channel caption look. Doubles as the app-wide mini bar (bottom-left of every
+/// page) and the caption over playing music videos.
+struct TVNowPlayingBug: View {
+    let item: MediaItem
+    var artistLine: String? = nil
+    var albumLine: String? = nil
+    var spinning = true
+
+    var body: some View {
+        HStack(spacing: 28) {
+            TVFlowCover(item: item, size: 150,
+                        discOut: true, spinning: spinning, showReflection: false)
+                .padding(.trailing, 26)   // room for the slid-out disc
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(item.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                if let artistLine, !artistLine.isEmpty {
+                    Text(artistLine)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let albumLine, !albumLine.isEmpty {
+                    Text(albumLine)
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 24)
+        .padding(.leading, 24)
+        .padding(.trailing, 44)
+        .background {
+            // Black gradient panel fading to the right, like an old channel lower-third.
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(LinearGradient(colors: [.black.opacity(0.88), .black.opacity(0.30)],
+                                     startPoint: .leading, endPoint: .trailing))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(.white.opacity(0.12), lineWidth: 0.5)
+                )
+        }
+    }
+}
+
 // MARK: - The queue carousel
 
 /// The Now Playing queue as an iTunes-style cover flow driven directly by the remote — the exact feel

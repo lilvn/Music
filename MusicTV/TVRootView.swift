@@ -23,6 +23,33 @@ struct TVRootView: View {
                 .padding(.trailing, 60)
                 .padding(.top, 20)
         }
+        // The channel bug IS the TV's mini bar: bottom-left on every page (Now Playing draws its own),
+        // clicking it opens Now Playing. Mirrors another device's session when nothing plays here.
+        .overlay(alignment: .bottomLeading) {
+            if tab != .nowPlaying {
+                Group {
+                    if let item = player.currentItem {
+                        Button { tab = .nowPlaying } label: {
+                            TVNowPlayingBug(item: item,
+                                            artistLine: item.primaryArtist,
+                                            albumLine: item.album,
+                                            spinning: player.isPlaying)
+                        }
+                    } else if let remote = SessionHub.shared.remote {
+                        Button { tab = .nowPlaying } label: {
+                            TVNowPlayingBug(item: remote.item,
+                                            artistLine: remote.item.primaryArtist,
+                                            albumLine: "Playing on \(remote.deviceName)",
+                                            spinning: !remote.isPaused)
+                        }
+                    }
+                }
+                .buttonStyle(.borderless)
+                .padding(.leading, 70)
+                .padding(.bottom, 60)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
     }
 }
 
