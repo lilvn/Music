@@ -140,63 +140,16 @@ struct TVNowPlayingView: View {
         .transition(.opacity.combined(with: .move(edge: .trailing)))
     }
 
-    /// Mirror of a remote session: its artwork + track, with controls that drive THAT device.
+    /// A remote session's Now Playing — SEAMLESS: the SAME skeuomorphic centrepiece as local playback
+    /// (cover + slid-out spinning CD + reflection + label). The nav bar's Transfer pill is the only
+    /// tell; the transport pill drives the remote device; the fill shows its live playhead.
     private func remoteMirror(_ remote: SessionHub.RemoteSession) -> some View {
-        HStack(spacing: 80) {
-            LibraryImage(url: client.artworkURL(for: remote.item, size: 800), maxPixel: 800) {
-                TVPlaceholder()
-            }
-            .frame(width: 480, height: 480)
-            .clipShape(RoundedRectangle(cornerRadius: TVDS.artwork, style: .continuous))
-            .shadow(color: .black.opacity(0.5), radius: 30, y: 14)
-
-            VStack(alignment: .leading, spacing: 28) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Playing on \(remote.deviceName)", systemImage: "airplayaudio")
-                        .font(.callout).foregroundStyle(.secondary)
-                    Text(remote.item.name)
-                        .font(.title2).fontWeight(.bold).lineLimit(2)
-                    Text(remote.item.primaryArtist)
-                        .font(.title3).foregroundStyle(.secondary)
-                }
-
-                // LIVE playhead — extrapolated between session polls, so it moves in real time.
-                TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
-                    let dur = max(remote.durationSeconds, 1)
-                    let pos = min(remote.livePosition(at: ctx.date), dur)
-                    VStack(spacing: 6) {
-                        ProgressView(value: pos / dur)
-                        HStack {
-                            Text(pos.formattedDuration)
-                            Spacer()
-                            Text(dur.formattedDuration)
-                        }
-                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                    }
-                }
-                .frame(width: 560)
-
-                HStack(spacing: 40) {
-                    Button { SessionHub.shared.previousRemote() } label: {
-                        Image(systemName: "backward.fill")
-                    }
-                    Button { SessionHub.shared.playPauseRemote() } label: {
-                        Image(systemName: remote.isPaused ? "play.fill" : "pause.fill")
-                    }
-                    Button { SessionHub.shared.nextRemote() } label: {
-                        Image(systemName: "forward.fill")
-                    }
-                }
-                .buttonStyle(.borderless)
-
-                if remote.item.type != "MusicVideo" {   // a video can't transfer as local audio
-                    Button { SessionHub.shared.transferHere() } label: {
-                        Label("Play on this TV", systemImage: "tv")
-                    }
-                    .disabled(SessionHub.shared.transferring)
-                }
-            }
-        }
-        .padding(80)
+        TVFlowCover(item: remote.item,
+                    size: 400,
+                    discOut: true,
+                    spinning: !remote.isPaused,
+                    showReflection: true,
+                    emphasized: true)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

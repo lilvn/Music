@@ -21,6 +21,20 @@
 			remoteGlobalIDString = B40AB70C2FF816AD00591F25;
 			remoteInfo = MusicTV;
 		};
+		B40AB91C2FF8DE3400591F25 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B40AB90E2FF8DE3400591F25;
+			remoteInfo = MusicMac;
+		};
+		B40AB9262FF8DE3400591F25 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B40AB90E2FF8DE3400591F25;
+			remoteInfo = MusicMac;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +42,9 @@
 		B40AB70D2FF816AD00591F25 /* Music2.0.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Music2.0.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B40AB7192FF816AE00591F25 /* MusicTVTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MusicTVTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B40AB7232FF816AE00591F25 /* MusicTVUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MusicTVUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B40AB90F2FF8DE3400591F25 /* MusicMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MusicMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B40AB91B2FF8DE3400591F25 /* MusicMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MusicMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B40AB9252FF8DE3400591F25 /* MusicMacUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MusicMacUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -79,6 +96,21 @@
 			path = MusicTVUITests;
 			sourceTree = "<group>";
 		};
+		B40AB9102FF8DE3400591F25 /* MusicMac */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MusicMac;
+			sourceTree = "<group>";
+		};
+		B40AB91E2FF8DE3400591F25 /* MusicMacTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MusicMacTests;
+			sourceTree = "<group>";
+		};
+		B40AB9282FF8DE3400591F25 /* MusicMacUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MusicMacUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -102,6 +134,21 @@
 			files = (
 			);
 		};
+		B40AB90C2FF8DE3400591F25 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		B40AB9182FF8DE3400591F25 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		B40AB9222FF8DE3400591F25 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -112,6 +159,9 @@
 				B40AB70E2FF816AD00591F25 /* MusicTV */,
 				B40AB71C2FF816AE00591F25 /* MusicTVTests */,
 				B40AB7262FF816AE00591F25 /* MusicTVUITests */,
+				B40AB9102FF8DE3400591F25 /* MusicMac */,
+				B40AB91E2FF8DE3400591F25 /* MusicMacTests */,
+				B40AB9282FF8DE3400591F25 /* MusicMacUITests */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -123,6 +173,9 @@
 				B40AB70D2FF816AD00591F25 /* Music2.0.app */,
 				B40AB7192FF816AE00591F25 /* MusicTVTests.xctest */,
 				B40AB7232FF816AE00591F25 /* MusicTVUITests.xctest */,
+				B40AB90F2FF8DE3400591F25 /* MusicMac.app */,
+				B40AB91B2FF8DE3400591F25 /* MusicMacTests.xctest */,
+				B40AB9252FF8DE3400591F25 /* MusicMacUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -208,6 +261,66 @@
 			productReference = B40AB7232FF816AE00591F25 /* MusicTVUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		B40AB90E2FF8DE3400591F25 /* MusicMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B40AB92D2FF8DE3400591F25 /* Build configuration list for PBXNativeTarget "MusicMac" */;
+			buildPhases = (
+				B40AB90B2FF8DE3400591F25 /* Sources */,
+				B40AB90C2FF8DE3400591F25 /* Frameworks */,
+				B40AB90D2FF8DE3400591F25 /* Resources */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				B40AB9102FF8DE3400591F25 /* MusicMac */,
+			);
+			name = MusicMac;
+			productName = MusicMac;
+			productReference = B40AB90F2FF8DE3400591F25 /* MusicMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B40AB91A2FF8DE3400591F25 /* MusicMacTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B40AB9302FF8DE3400591F25 /* Build configuration list for PBXNativeTarget "MusicMacTests" */;
+			buildPhases = (
+				B40AB9172FF8DE3400591F25 /* Sources */,
+				B40AB9182FF8DE3400591F25 /* Frameworks */,
+				B40AB9192FF8DE3400591F25 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B40AB91D2FF8DE3400591F25 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B40AB91E2FF8DE3400591F25 /* MusicMacTests */,
+			);
+			name = MusicMacTests;
+			productName = MusicMacTests;
+			productReference = B40AB91B2FF8DE3400591F25 /* MusicMacTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		B40AB9242FF8DE3400591F25 /* MusicMacUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B40AB9332FF8DE3400591F25 /* Build configuration list for PBXNativeTarget "MusicMacUITests" */;
+			buildPhases = (
+				B40AB9212FF8DE3400591F25 /* Sources */,
+				B40AB9222FF8DE3400591F25 /* Frameworks */,
+				B40AB9232FF8DE3400591F25 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B40AB9272FF8DE3400591F25 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B40AB9282FF8DE3400591F25 /* MusicMacUITests */,
+			);
+			name = MusicMacUITests;
+			productName = MusicMacUITests;
+			productReference = B40AB9252FF8DE3400591F25 /* MusicMacUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -232,6 +345,17 @@
 						CreatedOnToolsVersion = 26.6;
 						TestTargetID = B40AB70C2FF816AD00591F25;
 					};
+					B40AB90E2FF8DE3400591F25 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					B40AB91A2FF8DE3400591F25 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = B40AB90E2FF8DE3400591F25;
+					};
+					B40AB9242FF8DE3400591F25 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = B40AB90E2FF8DE3400591F25;
+					};
 				};
 			};
 			buildConfigurationList = 000000000000000010000000 /* Build configuration list for PBXProject "MusicApp" */;
@@ -252,6 +376,9 @@
 				B40AB70C2FF816AD00591F25 /* MusicTV */,
 				B40AB7182FF816AE00591F25 /* MusicTVTests */,
 				B40AB7222FF816AE00591F25 /* MusicTVUITests */,
+				B40AB90E2FF8DE3400591F25 /* MusicMac */,
+				B40AB91A2FF8DE3400591F25 /* MusicMacTests */,
+				B40AB9242FF8DE3400591F25 /* MusicMacUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -273,6 +400,21 @@
 			);
 		};
 		B40AB7212FF816AE00591F25 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		B40AB90D2FF8DE3400591F25 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		B40AB9192FF8DE3400591F25 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		B40AB9232FF8DE3400591F25 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
 			);
@@ -300,6 +442,21 @@
 			files = (
 			);
 		};
+		B40AB90B2FF8DE3400591F25 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		B40AB9172FF8DE3400591F25 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		B40AB9212FF8DE3400591F25 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -312,6 +469,16 @@
 			isa = PBXTargetDependency;
 			target = B40AB70C2FF816AD00591F25 /* MusicTV */;
 			targetProxy = B40AB7242FF816AE00591F25 /* PBXContainerItemProxy */;
+		};
+		B40AB91D2FF8DE3400591F25 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B40AB90E2FF8DE3400591F25 /* MusicMac */;
+			targetProxy = B40AB91C2FF8DE3400591F25 /* PBXContainerItemProxy */;
+		};
+		B40AB9272FF8DE3400591F25 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B40AB90E2FF8DE3400591F25 /* MusicMac */;
+			targetProxy = B40AB9262FF8DE3400591F25 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -695,6 +862,160 @@
 			};
 			name = Release;
 		};
+		B40AB92E2FF8DE3400591F25 /* Debug configuration for PBXNativeTarget "MusicMac" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = CVY4D7SJKP;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = studio485.MusicMac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B40AB92F2FF8DE3400591F25 /* Release configuration for PBXNativeTarget "MusicMac" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = CVY4D7SJKP;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = studio485.MusicMac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		B40AB9312FF8DE3400591F25 /* Debug configuration for PBXNativeTarget "MusicMacTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = CVY4D7SJKP;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = studio485.MusicMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MusicMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MusicMac";
+			};
+			name = Debug;
+		};
+		B40AB9322FF8DE3400591F25 /* Release configuration for PBXNativeTarget "MusicMacTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = CVY4D7SJKP;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = studio485.MusicMacTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MusicMac.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MusicMac";
+			};
+			name = Release;
+		};
+		B40AB9342FF8DE3400591F25 /* Debug configuration for PBXNativeTarget "MusicMacUITests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = CVY4D7SJKP;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = studio485.MusicMacUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = MusicMac;
+			};
+			name = Debug;
+		};
+		B40AB9352FF8DE3400591F25 /* Release configuration for PBXNativeTarget "MusicMacUITests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = CVY4D7SJKP;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = studio485.MusicMacUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = MusicMac;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -735,6 +1056,30 @@
 			buildConfigurations = (
 				B40AB72F2FF816AE00591F25 /* Debug configuration for PBXNativeTarget "MusicTVUITests" */,
 				B40AB7302FF816AE00591F25 /* Release configuration for PBXNativeTarget "MusicTVUITests" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		B40AB92D2FF8DE3400591F25 /* Build configuration list for PBXNativeTarget "MusicMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B40AB92E2FF8DE3400591F25 /* Debug configuration for PBXNativeTarget "MusicMac" */,
+				B40AB92F2FF8DE3400591F25 /* Release configuration for PBXNativeTarget "MusicMac" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		B40AB9302FF8DE3400591F25 /* Build configuration list for PBXNativeTarget "MusicMacTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B40AB9312FF8DE3400591F25 /* Debug configuration for PBXNativeTarget "MusicMacTests" */,
+				B40AB9322FF8DE3400591F25 /* Release configuration for PBXNativeTarget "MusicMacTests" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		B40AB9332FF8DE3400591F25 /* Build configuration list for PBXNativeTarget "MusicMacUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B40AB9342FF8DE3400591F25 /* Debug configuration for PBXNativeTarget "MusicMacUITests" */,
+				B40AB9352FF8DE3400591F25 /* Release configuration for PBXNativeTarget "MusicMacUITests" */,
 			);
 			defaultConfigurationName = Release;
 		};
