@@ -62,11 +62,13 @@ private struct TVNavBar: View {
                 .padding(5)
                 .glassEffect(.regular, in: .capsule)
 
-                // The mini bar: its own pill. Click = open Now Playing (+ transport for local playback).
-                TVNavMiniPill(selected: tab == .nowPlaying) { engage in
-                    tab = .nowPlaying
-                    if engage { engaged = true }
-                }
+                // The mini bar: its own pill. FOCUS = show Now Playing; CLICK = enter the transport.
+                TVNavMiniPill(selected: tab == .nowPlaying,
+                              onSelect: { tab = .nowPlaying },
+                              onClick: { engage in
+                                  tab = .nowPlaying
+                                  if engage { engaged = true }
+                              })
                 .padding(5)
                 .glassEffect(.regular, in: .capsule)
 
@@ -88,7 +90,8 @@ private struct TVNavBar: View {
 }
 
 /// A text tab pill: white capsule + black text when focused (the system tab bar look), subtle white
-/// wash when it's the selected tab, bare otherwise.
+/// wash when it's the selected tab. FOCUSING it switches the page (like the system tab bar) — no
+/// click needed.
 private struct TVNavTextItem: View {
     let title: String
     let selected: Bool
@@ -110,11 +113,12 @@ private struct TVNavTextItem: View {
         }
         .buttonStyle(.tvBare)
         .focused($focused)
+        .onChange(of: focused) { _, f in if f { action() } }   // focus = select, system-tab-bar style
         .animation(.easeOut(duration: 0.15), value: focused)
     }
 }
 
-/// An icon pill (Search) with the same focus/selection treatment as the text items.
+/// An icon pill (Search) with the same focus-switches-page treatment as the text items.
 private struct TVNavIconItem: View {
     let icon: String
     let selected: Bool
@@ -135,6 +139,7 @@ private struct TVNavIconItem: View {
         }
         .buttonStyle(.tvBare)
         .focused($focused)
+        .onChange(of: focused) { _, f in if f { action() } }   // focus = select
         .animation(.easeOut(duration: 0.15), value: focused)
     }
 }

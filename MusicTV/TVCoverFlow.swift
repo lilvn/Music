@@ -231,12 +231,14 @@ struct TVPillModel {
 }
 
 /// The COMPACT mini bar: its own Liquid Glass pill in the nav bar — spinning CD (like the iPhone bar)
-/// + title/artist with the artwork-wash progress fill. Focus grows it; CLICK hands off to the caller,
-/// which opens Now Playing and (for local playback) expands this pill into the transport.
+/// + title/artist with the artwork-wash progress fill. FOCUSING it opens Now Playing (like every other
+/// nav pill); CLICKING it expands the pill into the transport for local playback.
 struct TVNavMiniPill: View {
     let selected: Bool
-    /// Called on click; `engage` is true when local playback exists (the pill can become the transport).
-    let action: (_ engage: Bool) -> Void
+    /// Focus landed on the pill → show the Now Playing page (no click needed).
+    let onSelect: () -> Void
+    /// Click: `engage` is true when local playback exists (the pill can become the transport).
+    let onClick: (_ engage: Bool) -> Void
 
     @Environment(Player.self) private var player
     @FocusState private var focused: Bool
@@ -246,7 +248,7 @@ struct TVNavMiniPill: View {
         let model = TVPillModel.current(player)
         Button {
             let videoCtl = TVVideoController.shared
-            action(player.currentItem != nil || videoCtl.direct)
+            onClick(player.currentItem != nil || videoCtl.direct)
         } label: {
             if let m = model {
                 HStack(spacing: 12) {
@@ -305,6 +307,7 @@ struct TVNavMiniPill: View {
         }
         .buttonStyle(.tvBare)
         .focused($focused)
+        .onChange(of: focused) { _, f in if f { onSelect() } }   // focus = open Now Playing
         .animation(.easeOut(duration: 0.15), value: focused)
     }
 }
