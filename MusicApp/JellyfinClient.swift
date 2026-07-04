@@ -64,6 +64,8 @@ final class JellyfinClient {
         "Apple TV"
 #elseif os(macOS)
         "Mac"
+#elseif os(watchOS)
+        "Apple Watch"
 #else
         UIDevice.current.model   // "iPhone" / "iPad"
 #endif

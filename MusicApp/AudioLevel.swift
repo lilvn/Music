@@ -1,4 +1,16 @@
 import AVFoundation
+#if os(watchOS)
+
+/// watchOS has no MediaToolbox audio tap — the watch is a remote, not a meter. Same API, no-op.
+@MainActor
+final class AudioLevelMonitor {
+    var onLevel: ((Double) -> Void)?
+    func installTap(on item: AVPlayerItem) {}
+    func start() {}
+    func stop() { onLevel?(0) }
+}
+
+#else
 import MediaToolbox
 import Accelerate
 import QuartzCore
@@ -132,3 +144,4 @@ private func tapProcess(_ tap: MTAudioProcessingTap,
     }
     if totalSamples > 0 { box.value = sqrtf(sumOfMeanSquares / totalSamples) }
 }
+#endif   // !os(watchOS)
