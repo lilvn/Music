@@ -113,7 +113,7 @@ struct TVNowPlayingView: View {
         }
         .frame(maxWidth: 1040)
         .frame(maxWidth: .infinity)
-        .padding(.top, 30)
+        .padding(.top, 130)   // clear the overlaid nav-bar/transport pill
         .padding(.bottom, 60)
         .transition(.opacity.combined(with: .move(edge: .trailing)))
     }

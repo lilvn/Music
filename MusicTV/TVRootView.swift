@@ -12,16 +12,30 @@ struct TVRootView: View {
     @State private var engaged = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            TVNavBar(tab: $tab, engaged: $engaged)
-
+        // The bar OVERLAYS the pages (ZStack, not a VStack): page backgrounds — the Now Playing
+        // artwork wash, a playing video — run full-bleed behind the glass bar instead of dying at a
+        // black header band. Pages clear the bar via scroll-content margins (which DO propagate into
+        // their ScrollViews, incl. detail pages), so content still starts below it and scrolls under.
+        ZStack(alignment: .top) {
             TabView(selection: $tab) {
-                Tab("Home", systemImage: "house.fill", value: TVTab.home) { TVHomeView().toolbar(.hidden, for: .tabBar) }
-                Tab("Albums", systemImage: "square.stack.fill", value: TVTab.albums) { TVAlbumsView().toolbar(.hidden, for: .tabBar) }
-                Tab("Playlists", systemImage: "music.note.list", value: TVTab.playlists) { TVPlaylistsView().toolbar(.hidden, for: .tabBar) }
-                Tab("Now Playing", systemImage: "waveform", value: TVTab.nowPlaying) { TVNowPlayingView().toolbar(.hidden, for: .tabBar) }
-                Tab("Search", systemImage: "magnifyingglass", value: TVTab.search, role: .search) { TVSearchView().toolbar(.hidden, for: .tabBar) }
+                Tab("Home", systemImage: "house.fill", value: TVTab.home) {
+                    TVHomeView().toolbar(.hidden, for: .tabBar).contentMargins(.top, 110, for: .scrollContent)
+                }
+                Tab("Albums", systemImage: "square.stack.fill", value: TVTab.albums) {
+                    TVAlbumsView().toolbar(.hidden, for: .tabBar).contentMargins(.top, 110, for: .scrollContent)
+                }
+                Tab("Playlists", systemImage: "music.note.list", value: TVTab.playlists) {
+                    TVPlaylistsView().toolbar(.hidden, for: .tabBar).contentMargins(.top, 110, for: .scrollContent)
+                }
+                Tab("Now Playing", systemImage: "waveform", value: TVTab.nowPlaying) {
+                    TVNowPlayingView().toolbar(.hidden, for: .tabBar)
+                }
+                Tab("Search", systemImage: "magnifyingglass", value: TVTab.search, role: .search) {
+                    TVSearchView().toolbar(.hidden, for: .tabBar).contentMargins(.top, 110, for: .scrollContent)
+                }
             }
+
+            TVNavBar(tab: $tab, engaged: $engaged)
         }
         .background(Color.black.ignoresSafeArea())
         // Starting playback anywhere jumps straight to Now Playing with the transport open.
