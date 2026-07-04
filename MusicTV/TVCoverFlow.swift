@@ -290,6 +290,8 @@ struct TVNowPlayingArtwork: View {
     /// Docked (video backdrop): the label sits to the RIGHT of the cover, and the whole thing hugs the
     /// left. Undocked (audio): big centred cover with its title/artist in the reflection below.
     var docked = false
+    /// Called on any remote input here so the parent can keep the playhead footer awake.
+    var onInteract: () -> Void = {}
     @FocusState private var focused: Bool
 
     // ---- Track-change choreography -------------------------------------------------------------
@@ -328,6 +330,7 @@ struct TVNowPlayingArtwork: View {
         .focused($focused)
         .scaleEffect(focused ? 1.02 : 1.0)   // breathes subtly when the remote is on it
         .onMoveCommand { direction in
+            onInteract()
             switch direction {
             case .left:  step(-1)
             case .right: step(+1)
@@ -337,7 +340,7 @@ struct TVNowPlayingArtwork: View {
                 break
             }
         }
-        .onTapGesture { player.togglePlayPause() }   // remote click = play/pause
+        .onTapGesture { onInteract(); player.togglePlayPause() }   // remote click = play/pause
         // The track changed underneath us (natural end, remote command, another device): the retract
         // already happened via `nearEnd` — commit it and pop the new CD once the swap settles.
         .onChange(of: player.queue.currentIndex) { _, _ in

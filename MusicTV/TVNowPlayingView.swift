@@ -15,6 +15,11 @@ struct TVNowPlayingView: View {
     private var videoCtl: TVVideoController { TVVideoController.shared }
     private var inVideoMode: Bool { videoCtl.activeVideo != nil }
 
+    // The playhead footer fades out after a few idle seconds (like a tvOS transport) and returns on any
+    // remote input, track change, or play/pause.
+    @State private var footerVisible = true
+    @State private var footerIdle: Task<Void, Never>?
+
     var body: some View {
         // VStack, NOT a ZStack: the fixed footer is the bottom row and the moving carousel fills the row
         // above it, so the footer is always on-screen. (A bottom-aligned child of a ZStack whose backdrop
@@ -30,7 +35,8 @@ struct TVNowPlayingView: View {
                     // tracks flanking it. Centred for plain audio; when a music video is the backdrop it
                     // shrinks and DOCKS toward the footer. Only the DOCK moves — the footer stays put.
                     let docked = inVideoMode
-                    TVNowPlayingArtwork(coverSize: docked ? 150 : 400, docked: docked)
+                    TVNowPlayingArtwork(coverSize: docked ? 150 : 400, docked: docked,
+                                        onInteract: bumpFooter)
                         .frame(maxWidth: .infinity, maxHeight: .infinity,
                                alignment: docked ? .bottomLeading : .center)
                         .padding(.leading, docked ? 80 : 0)
@@ -53,9 +59,18 @@ struct TVNowPlayingView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // The fixed full-width playhead footer.
-            if player.currentItem != nil || videoCtl.direct { progressFooter }
+            // The fixed full-width playhead footer — fades on idle, back on interaction.
+            if player.currentItem != nil || videoCtl.direct {
+                progressFooter
+                    .opacity(footerVisible ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.4), value: footerVisible)
+            }
         }
+        .onAppear(perform: bumpFooter)
+        .onDisappear { footerIdle?.cancel() }
+        // Track change and play/pause both bring the bar back.
+        .onChange(of: player.currentItem?.id) { _, _ in bumpFooter() }
+        .onChange(of: player.isPlaying) { _, _ in bumpFooter() }
         .background {
             if inVideoMode, let av = videoCtl.avPlayer {
                 TVVideoLayer(player: av).ignoresSafeArea().transition(.opacity)
@@ -69,6 +84,7 @@ struct TVNowPlayingView: View {
         // and matched-video the docked carousel owns focus and skips tracks itself.
         .focusable(videoCtl.direct)
         .onMoveCommand { direction in
+            bumpFooter()
             guard videoCtl.direct else { return }
             switch direction {
             case .left:  videoCtl.skipDirect(-1, client: client, audio: player)
@@ -79,6 +95,17 @@ struct TVNowPlayingView: View {
         // NOTE: video mode is owned by the APP ROOT (MusicTVApp evaluates on track/play changes), not
         // this view — so the video keeps playing in the background when you browse other pages. This
         // view only renders the current state; the fullscreen layer reattaches when you come back.
+    }
+
+    /// Show the footer and restart the idle countdown. Called on appear and on every remote input,
+    /// track change, and play/pause.
+    private func bumpFooter() {
+        footerVisible = true
+        footerIdle?.cancel()
+        footerIdle = Task {
+            try? await Task.sleep(for: .seconds(4))
+            if !Task.isCancelled { footerVisible = false }
+        }
     }
 
     // MARK: - Chrome (minimal liquid glass)
