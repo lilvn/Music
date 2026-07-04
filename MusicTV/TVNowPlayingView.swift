@@ -7,8 +7,28 @@ import SwiftUI
 final class TVNowPlayingUI {
     static let shared = TVNowPlayingUI()
     enum Pane { case lyrics, queue }
-    var pane: Pane?
+    var pane: Pane? {
+        didSet { bumpChrome() }
+    }
     func toggle(_ p: Pane) { pane = (pane == p) ? nil : p }
+
+    /// While a music video plays and the remote is idle, the nav bar hides (cinema mode) — any
+    /// interaction brings it back. `chromeVisible` only ever goes false while a video is active.
+    private(set) var chromeVisible = true
+    @ObservationIgnored private var chromeIdle: Task<Void, Never>?
+
+    /// Show the chrome and restart the idle countdown. Call on ANY remote interaction. The hide only
+    /// fires if a video is still playing when the countdown lands (audio-only never hides the bar).
+    func bumpChrome() {
+        chromeVisible = true
+        chromeIdle?.cancel()
+        chromeIdle = Task {
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            if TVVideoController.shared.activeVideo != nil { chromeVisible = false }
+        }
+    }
+
     private init() {}
 }
 
@@ -44,7 +64,8 @@ struct TVNowPlayingView: View {
                 // is the backdrop OR a pane (lyrics/queue) is open it shrinks and DOCKS bottom-left.
                 let docked = inVideoMode || ui.pane != nil
                 ZStack {
-                    TVNowPlayingArtwork(coverSize: docked ? 150 : 400, docked: docked)
+                    TVNowPlayingArtwork(coverSize: docked ? 150 : 400, docked: docked,
+                                        onInteract: { ui.bumpChrome() })
                         .frame(maxWidth: .infinity, maxHeight: .infinity,
                                alignment: docked ? .bottomLeading : .center)
                         .padding(.leading, docked ? 80 : 0)
@@ -89,6 +110,7 @@ struct TVNowPlayingView: View {
         // trackpad swipes skip between its videos. Audio skips live on the carousel + transport pill.
         .focusable(videoCtl.direct)
         .onMoveCommand { direction in
+            ui.bumpChrome()
             guard videoCtl.direct else { return }
             switch direction {
             case .left:  videoCtl.skipDirect(-1, client: client, audio: player)
@@ -113,7 +135,7 @@ struct TVNowPlayingView: View {
         }
         .frame(maxWidth: 1040)
         .frame(maxWidth: .infinity)
-        .padding(.top, 130)   // clear the overlaid nav-bar/transport pill
+        .padding(.top, 130)   // clear the overlaid nav bar / transport pill
         .padding(.bottom, 60)
         .transition(.opacity.combined(with: .move(edge: .trailing)))
     }

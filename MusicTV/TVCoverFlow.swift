@@ -251,11 +251,19 @@ struct TVNavMiniPill: View {
             onClick(player.currentItem != nil || videoCtl.direct)
         } label: {
             if let m = model {
-                Group {
-                    if selected && focused {
-                        // Now Playing is already open (it shows the track + artwork) — highlighting
-                        // the pill PREVIEWS what a click expands into: just the playback controls,
-                        // clean, no CD, sized like the text pills.
+                HStack(spacing: 12) {
+                    // The round CD + title never leave, in any state — the iOS mini bar look.
+                    TVSpinningDisc(item: m.item, size: 38, spinning: m.spinning)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(m.item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
+                        if let sub = m.sub, !sub.isEmpty {
+                            Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: 260, alignment: .leading)
+
+                    if focused {
+                        // Highlighted → preview of what a click expands into.
                         HStack(spacing: 22) {
                             Image(systemName: "backward.fill")
                             Image(systemName: m.spinning ? "pause.fill" : "play.fill")
@@ -263,25 +271,13 @@ struct TVNavMiniPill: View {
                         }
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(.primary)
-                        .padding(.horizontal, 26)
-                        .padding(.vertical, 15)
-                    } else {
-                        HStack(spacing: 12) {
-                            // The round CD itself, spinning — the iOS mini bar look.
-                            TVSpinningDisc(item: m.item, size: 38, spinning: m.spinning)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(m.item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
-                                if let sub = m.sub, !sub.isEmpty {
-                                    Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                                }
-                            }
-                            .frame(maxWidth: 240, alignment: .leading)
-                        }
                         .padding(.leading, 8)
-                        .padding(.trailing, 18)
-                        .padding(.vertical, 7)
+                        .padding(.trailing, 10)
                     }
                 }
+                .padding(.leading, 8)
+                .padding(.trailing, 18)
+                .padding(.vertical, 7)
                 .background(
                     Capsule().fill(selected && !focused ? AnyShapeStyle(.white.opacity(0.16))
                                                         : AnyShapeStyle(.clear))
@@ -350,41 +346,76 @@ struct TVNavTransportPill: View {
     var body: some View {
         let direct = videoCtl.direct
         let item = direct ? videoCtl.activeVideo : player.currentItem
-        HStack(spacing: 14) {
-            // NO CD and NO track name here — Now Playing (behind the pill) already shows both.
-            // While scrubbing, a live time readout leads the row.
-            if scrubbing {
-                Text("\(player.currentTime.formattedDuration) · \(player.duration.formattedDuration)")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .padding(.leading, 8)
+        VStack(spacing: 4) {
+            HStack(spacing: 14) {
+                if let item {
+                    // The CD + title never leave — same left cluster as the compact pill.
+                    TVSpinningDisc(item: item, size: 38,
+                                   spinning: direct ? !videoCtl.directPaused : player.isPlaying)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
+                        // While scrubbing the sub line becomes the live time readout.
+                        Text(scrubbing
+                             ? "\(player.currentTime.formattedDuration) · \(player.duration.formattedDuration)"
+                             : item.primaryArtist)
+                            .font(.caption2)
+                            .foregroundStyle(scrubbing ? .primary : .secondary)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: 260, alignment: .leading)
+                }
+
+                Spacer(minLength: 20)
+
+                controlButton(.prev, "backward.fill") {
+                    if direct { videoCtl.skipDirect(-1, client: client, audio: player) }
+                    else { player.previousTrack() }
+                }
+                controlButton(.play, (direct ? !videoCtl.directPaused : player.isPlaying) ? "pause.fill" : "play.fill") {
+                    direct ? videoCtl.togglePlayPause() : player.togglePlayPause()
+                }
+                controlButton(.next, "forward.fill") {
+                    if direct { videoCtl.skipDirect(+1, client: client, audio: player) }
+                    else { player.nextTrack() }
+                }
+
+                if !direct {
+                    controlButton(.lyrics, TVNowPlayingUI.shared.pane == .lyrics ? "quote.bubble.fill" : "quote.bubble") {
+                        TVNowPlayingUI.shared.toggle(.lyrics)
+                    }
+                    .padding(.leading, 14)
+                    controlButton(.queue, "list.triangle") {
+                        TVNowPlayingUI.shared.toggle(.queue)
+                    }
+                }
             }
 
-            controlButton(.prev, "backward.fill") {
-                if direct { videoCtl.skipDirect(-1, client: client, audio: player) }
-                else { player.previousTrack() }
-            }
-            controlButton(.play, (direct ? !videoCtl.directPaused : player.isPlaying) ? "pause.fill" : "play.fill") {
-                direct ? videoCtl.togglePlayPause() : player.togglePlayPause()
-            }
-            controlButton(.next, "forward.fill") {
-                if direct { videoCtl.skipDirect(+1, client: client, audio: player) }
-                else { player.nextTrack() }
-            }
-
+            // The scrub stop, BELOW the buttons in layout (an overlay spanning the pill stole the
+            // focus engine's left/right moves between the buttons): invisible, full width — press
+            // DOWN from the controls to grab the fill, drag left/right to scrub (±5s per pan tick),
+            // UP or a click returns to play.
             if !direct {
-                controlButton(.lyrics, TVNowPlayingUI.shared.pane == .lyrics ? "quote.bubble.fill" : "quote.bubble") {
-                    TVNowPlayingUI.shared.toggle(.lyrics)
-                }
-                .padding(.leading, 14)
-                controlButton(.queue, "list.triangle") {
-                    TVNowPlayingUI.shared.toggle(.queue)
-                }
+                Color.clear
+                    .frame(height: 10)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                    .focusable(true)
+                    .focused($focus, equals: .scrub)
+                    .onMoveCommand { dir in
+                        switch dir {
+                        case .left:  player.seek(to: max(0, player.currentTime - 5))
+                        case .right: player.seek(to: min(player.duration, player.currentTime + 5))
+                        case .up, .down: focus = .play   // onMoveCommand consumes ALL moves — route out
+                        @unknown default: break
+                        }
+                    }
+                    .onTapGesture { focus = .play }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.top, 8)
+        .padding(.bottom, direct ? 8 : 4)
         // The artwork wash IS the progress bar: revealed left→right across the pill as the track
         // plays — brighter while scrubbing. No separate bar.
         .background(alignment: .leading) {
@@ -404,26 +435,12 @@ struct TVNavTransportPill: View {
         }
         .clipShape(Capsule())
         .glassEffect(.regular, in: .capsule)
-        // The invisible scrub stop: press DOWN from the controls to grab the fill itself, then drag
-        // left/right to scrub (each pan tick seeks ±5s); UP or a click hands focus back to play.
-        .background {
-            Color.clear
-                .contentShape(Rectangle())
-                .focusable(!direct)
-                .focused($focus, equals: .scrub)
-                .onMoveCommand { dir in
-                    switch dir {
-                    case .left:  player.seek(to: max(0, player.currentTime - 5))
-                    case .right: player.seek(to: min(player.duration, player.currentTime + 5))
-                    case .up, .down: focus = .play   // onMoveCommand consumes ALL moves — route out
-                    @unknown default: break
-                    }
-                }
-                .onTapGesture { focus = .play }
-        }
-        .scaleEffect(scrubbing ? 1.03 : 1.0)
+        .scaleEffect(scrubbing ? 1.02 : 1.0)
         .animation(.easeOut(duration: 0.15), value: scrubbing)
         .focusSection()
+        // Moving between the controls counts as interaction — keeps the bar from cinema-hiding
+        // out from under the user mid-navigation.
+        .onChange(of: focus) { _, _ in TVNowPlayingUI.shared.bumpChrome() }
         // Menu/back collapses the transport and hands the nav bar back.
         .onExitCommand { engaged = false }
         .onAppear {

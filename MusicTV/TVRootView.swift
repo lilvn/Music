@@ -35,16 +35,27 @@ struct TVRootView: View {
                 }
             }
 
-            TVNavBar(tab: $tab, engaged: $engaged)
+            // Cinema mode: while a music video plays and the remote is idle, the whole nav bar slides
+            // away; any interaction (bumpChrome) brings it back. Audio-only never hides it.
+            if TVNowPlayingUI.shared.chromeVisible {
+                TVNavBar(tab: $tab, engaged: $engaged)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
+        .animation(.easeInOut(duration: 0.35), value: TVNowPlayingUI.shared.chromeVisible)
         .background(Color.black.ignoresSafeArea())
         // Starting playback anywhere jumps straight to Now Playing with the transport open.
         .environment(\.tvOpenNowPlaying) { tab = .nowPlaying; engaged = true }
-        .onChange(of: tab) { _, t in if t != .nowPlaying { engaged = false } }
+        .onChange(of: tab) { _, t in
+            if t != .nowPlaying { engaged = false }
+            TVNowPlayingUI.shared.bumpChrome()
+        }
+        .onChange(of: engaged) { _, _ in TVNowPlayingUI.shared.bumpChrome() }
         // The Siri Remote play/pause button toggles playback from ANY tab / focus — including a track
         // restored (paused) at launch, where focus never reached Now Playing's own handler. The direct
         // Music Videos playlist toggles the video; everything else the audio.
         .onPlayPauseCommand {
+            TVNowPlayingUI.shared.bumpChrome()
             let v = TVVideoController.shared
             v.direct ? v.togglePlayPause() : player.togglePlayPause()
         }
@@ -53,11 +64,10 @@ struct TVRootView: View {
 
 // MARK: - The custom nav bar
 
-/// Home / Albums / Playlists in one glass capsule, the mini bar as its OWN separate pill (like iOS),
-/// Search as another separated pill, and the Transfer button — everything focusable, ALWAYS visible.
-/// Clicking the mini bar expands just that pill into the transport (`engaged`) with focus moving
-/// inside to previous / play-pause / next / lyrics / queue / scrub; the other nav pills stay around
-/// it, so swiping left (or Menu) goes straight back to navigating.
+/// ONE row: Home / Albums / Playlists in a glass capsule, the mini bar as its OWN pill beside them,
+/// Search as a separated pill, and the Transfer button — everything focusable, always visible.
+/// Clicking the mini bar expands it in place into the transport (`engaged`); the CD + title never
+/// leave it. Menu or focusing a nav pill collapses it back.
 private struct TVNavBar: View {
     @Binding var tab: TVTab
     @Binding var engaged: Bool
@@ -75,9 +85,9 @@ private struct TVNavBar: View {
             if engaged {
                 // The mini bar, expanded into the transport — in place, between its neighbours.
                 TVNavTransportPill(engaged: $engaged)
-                    .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .top)))
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
             } else {
-                // The mini bar: its own pill. FOCUS = show Now Playing; CLICK = enter the transport.
+                // FOCUS = show Now Playing; CLICK = enter the transport.
                 TVNavMiniPill(selected: tab == .nowPlaying,
                               onSelect: { tab = .nowPlaying },
                               onClick: { engage in
@@ -93,7 +103,7 @@ private struct TVNavBar: View {
                 .padding(5)
                 .glassEffect(.regular, in: .capsule)
 
-            // Focusable here in the bar (its old floating overlay was unreachable by the focus engine).
+            // Focusable here in the bar (a floating overlay was unreachable by the focus engine).
             TransferButton()
         }
         .focusSection()
