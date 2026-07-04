@@ -334,6 +334,9 @@ struct TVNavMiniPill: View {
 /// pill and hands the nav bar back.
 struct TVNavTransportPill: View {
     @Binding var engaged: Bool
+    /// The nav bar's glass namespace — this pill shares the compact pill's glass ID, so the glass
+    /// MORPHS between the two states (the iOS Liquid Glass search-bar behavior).
+    var glassNS: Namespace.ID
 
     @Environment(Player.self) private var player
     @Environment(JellyfinClient.self) private var client
@@ -435,6 +438,7 @@ struct TVNavTransportPill: View {
         }
         .clipShape(Capsule())
         .glassEffect(.regular, in: .capsule)
+        .glassEffectID("mini", in: glassNS)   // same ID as the compact pill → glass morphs, not swaps
         .scaleEffect(scrubbing ? 1.02 : 1.0)
         .animation(.easeOut(duration: 0.15), value: scrubbing)
         .focusSection()

@@ -71,40 +71,48 @@ struct TVRootView: View {
 private struct TVNavBar: View {
     @Binding var tab: TVTab
     @Binding var engaged: Bool
+    /// One glass namespace for the whole bar — pills MORPH between states (compact mini bar ↔
+    /// transport) instead of cross-fading, the iOS Liquid Glass behavior.
+    @Namespace private var glassNS
 
     var body: some View {
-        HStack(spacing: 18) {
-            HStack(spacing: 4) {
-                TVNavTextItem(title: "Home", selected: tab == .home) { tab = .home }
-                TVNavTextItem(title: "Albums", selected: tab == .albums) { tab = .albums }
-                TVNavTextItem(title: "Playlists", selected: tab == .playlists) { tab = .playlists }
-            }
-            .padding(5)
-            .glassEffect(.regular, in: .capsule)
-
-            if engaged {
-                // The mini bar, expanded into the transport — in place, between its neighbours.
-                TVNavTransportPill(engaged: $engaged)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-            } else {
-                // FOCUS = show Now Playing; CLICK = enter the transport.
-                TVNavMiniPill(selected: tab == .nowPlaying,
-                              onSelect: { tab = .nowPlaying },
-                              onClick: { engage in
-                                  tab = .nowPlaying
-                                  if engage { engaged = true }
-                              })
+        GlassEffectContainer(spacing: 18) {
+            HStack(spacing: 18) {
+                HStack(spacing: 4) {
+                    TVNavTextItem(title: "Home", selected: tab == .home) { tab = .home }
+                    TVNavTextItem(title: "Albums", selected: tab == .albums) { tab = .albums }
+                    TVNavTextItem(title: "Playlists", selected: tab == .playlists) { tab = .playlists }
+                }
                 .padding(5)
                 .glassEffect(.regular, in: .capsule)
+                .glassEffectID("nav", in: glassNS)
+
+                if engaged {
+                    // The mini bar, expanded into the transport — same glass ID as the compact pill,
+                    // so the glass MORPHS between the two instead of swapping.
+                    TVNavTransportPill(engaged: $engaged, glassNS: glassNS)
+                } else {
+                    // FOCUS = show Now Playing; CLICK = enter the transport.
+                    TVNavMiniPill(selected: tab == .nowPlaying,
+                                  onSelect: { tab = .nowPlaying },
+                                  onClick: { engage in
+                                      tab = .nowPlaying
+                                      if engage { engaged = true }
+                                  })
+                    .padding(5)
+                    .glassEffect(.regular, in: .capsule)
+                    .glassEffectID("mini", in: glassNS)
+                }
+
+                // Search — a separated pill, like the iOS search tab.
+                TVNavIconItem(icon: "magnifyingglass", selected: tab == .search) { tab = .search }
+                    .padding(5)
+                    .glassEffect(.regular, in: .capsule)
+                    .glassEffectID("search", in: glassNS)
+
+                // Focusable here in the bar (a floating overlay was unreachable by the focus engine).
+                TransferButton()
             }
-
-            // Search — a separated pill, like the iOS search tab.
-            TVNavIconItem(icon: "magnifyingglass", selected: tab == .search) { tab = .search }
-                .padding(5)
-                .glassEffect(.regular, in: .capsule)
-
-            // Focusable here in the bar (a floating overlay was unreachable by the focus engine).
-            TransferButton()
         }
         .focusSection()
         .frame(maxWidth: .infinity)
