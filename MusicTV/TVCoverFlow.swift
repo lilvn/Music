@@ -190,87 +190,119 @@ struct TVFlowCover: View {
     }
 }
 
-// MARK: - The TV's mini bar (top-center, below the tab bar)
+// MARK: - The nav bar's mini pill (the Now Playing tab item)
 
-/// The TV's mini bar, styled like the iPhone MiniPlayer: a Liquid Glass capsule sized by its caller
-/// (TVRootView gives it ~the tab bar's width, centered right below it). Spinning CD + two-line
-/// title/artist on the left, play-state glyph on the right, and the artwork-wash progress fill
-/// revealing left→right as the track plays. Pure chrome — no Buttons, never focusable.
-struct TVNowPlayingBug: View {
-    let item: MediaItem
-    var artistLine: String? = nil
-    var albumLine: String? = nil
-    var spinning = true
+/// The mini bar AS a nav-bar pill: it sits inside the custom nav bar in place of a "Now Playing" text
+/// tab. Small spinning CD + title/artist, the artwork-wash fill showing progress (live-extrapolated for
+/// a remote session), and clicking it opens the Now Playing page. When nothing is playing anywhere it
+/// falls back to a plain "Now Playing" text pill.
+struct TVNavMiniPill: View {
+    let selected: Bool
+    let action: () -> Void
 
     @Environment(Player.self) private var player
-    private let cover: CGFloat = 52
+    @FocusState private var focused: Bool
+    private let cover: CGFloat = 34
     @State private var width: CGFloat = 1
 
-    /// 0…1 playhead for the current track — the audio Player (normal + matched-video) or the direct
-    /// video. Drives the fill, exactly like the iPhone mini bar.
-    private var progress: Double {
+    private struct PillModel {
+        let item: MediaItem
+        let sub: String?
+        let spinning: Bool
+        let remote: SessionHub.RemoteSession?   // non-nil → live-extrapolate the fill
+    }
+
+    /// What the pill mirrors — same priority as the accessory on iOS: direct video, an ACTIVELY
+    /// playing remote session, the local track, any remote session, else nothing.
+    private var model: PillModel? {
+        let videoCtl = TVVideoController.shared
+        if videoCtl.direct, let video = videoCtl.activeVideo {
+            return PillModel(item: video, sub: video.primaryArtist, spinning: true, remote: nil)
+        }
+        if let r = SessionHub.shared.remote, !r.isPaused, !player.isPlaying {
+            return PillModel(item: r.item, sub: r.deviceName, spinning: true, remote: r)
+        }
+        if let item = player.currentItem {
+            return PillModel(item: item, sub: item.primaryArtist, spinning: player.isPlaying, remote: nil)
+        }
+        if let r = SessionHub.shared.remote {
+            return PillModel(item: r.item, sub: r.deviceName, spinning: !r.isPaused, remote: r)
+        }
+        return nil
+    }
+
+    private func progress(at date: Date, _ m: PillModel) -> Double {
+        if let r = m.remote {
+            let dur = max(r.durationSeconds, 1)
+            return min(max(r.livePosition(at: date) / dur, 0), 1)
+        }
         let ctl = TVVideoController.shared
         if ctl.direct { return ctl.directProgress }
         return player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0
     }
 
-    /// One secondary line: the artist, or the album/"Playing on X" line when that's all we have.
-    private var subLine: String? {
-        if let artistLine, !artistLine.isEmpty { return artistLine }
-        if let albumLine, !albumLine.isEmpty { return albumLine }
-        return nil
-    }
-
     var body: some View {
-        HStack(spacing: 14) {
-            // The bar carries its own text, so hide the cover's built-in label.
-            TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
-                        showReflection: false, showLabel: false)
-                .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.name)
-                    .font(.callout).fontWeight(.semibold)
-                    .lineLimit(1)
-                if let subLine {
-                    Text(subLine).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        Button(action: action) {
+            if let m = model {
+                // Media pill: artwork fill shows through; focus = white ring + slight grow (a white
+                // platter would fight the fill).
+                HStack(spacing: 10) {
+                    TVFlowCover(item: m.item, size: cover, discOut: true, spinning: m.spinning,
+                                showReflection: false, showLabel: false)
+                        .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(m.item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
+                        if let sub = m.sub, !sub.isEmpty {
+                            Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: 240, alignment: .leading)
                 }
-            }
-
-            Spacer(minLength: 12)
-
-            // Play-state glyph (non-interactive — `spinning` also covers remote/video branches).
-            Image(systemName: spinning ? "pause.fill" : "play.fill")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.primary.opacity(0.85))
-                .contentTransition(.symbolEffect(.replace))
-                .padding(.trailing, 6)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)   // fill the caller's width, like the iOS bar
-        .padding(.leading, 10)
-        .padding(.trailing, 24)
-        .padding(.vertical, 8)
-        // Progress FILL, like the iPhone mini bar: the artwork blurred into a wash, revealed left→right.
-        .background(alignment: .leading) {
-            TVArtworkFill(item: item)
-                .frame(width: width)
-                .frame(maxHeight: .infinity)
-                .mask(alignment: .leading) {
-                    Rectangle()
-                        .frame(width: max(0, width * progress))
-                        .animation(.linear(duration: 0.5), value: progress)
+                .padding(.leading, 6)
+                .padding(.trailing, 18)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule().fill(selected && !focused ? AnyShapeStyle(.white.opacity(0.16))
+                                                        : AnyShapeStyle(.clear))
+                )
+                // Progress fill, live: the artwork wash revealed left→right as the track plays.
+                .background(alignment: .leading) {
+                    TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
+                        TVArtworkFill(item: m.item)
+                            .frame(width: width)
+                            .frame(maxHeight: .infinity)
+                            .mask(alignment: .leading) {
+                                Rectangle().frame(width: max(0, width * progress(at: ctx.date, m)))
+                            }
+                    }
+                    .allowsHitTesting(false)
                 }
-                .allowsHitTesting(false)
-        }
-        // Single instance (not a grid cell), so this GeometryReader is safe — it just reads the pill's
-        // width for the fill mask.
-        .background {
-            GeometryReader { g in
-                Color.clear.onChange(of: g.size.width, initial: true) { _, w in width = w }
+                // Single instance — safe GeometryReader, just measures the pill for the fill mask.
+                .background {
+                    GeometryReader { g in
+                        Color.clear.onChange(of: g.size.width, initial: true) { _, w in width = w }
+                    }
+                }
+                .clipShape(Capsule())
+                .overlay(Capsule().strokeBorder(.white.opacity(focused ? 0.95 : 0), lineWidth: 2))
+                .scaleEffect(focused ? 1.04 : 1.0)
+            } else {
+                // Nothing playing anywhere — a plain text tab like its siblings.
+                Text("Now Playing")
+                    .font(.callout).fontWeight(.medium)
+                    .foregroundStyle(focused ? AnyShapeStyle(.black) : AnyShapeStyle(.primary))
+                    .padding(.horizontal, 26)
+                    .padding(.vertical, 12)
+                    .background(
+                        Capsule().fill(focused ? AnyShapeStyle(.white)
+                                       : selected ? AnyShapeStyle(.white.opacity(0.16))
+                                       : AnyShapeStyle(.clear))
+                    )
             }
         }
-        .clipShape(Capsule())
-        .glassEffect(.regular, in: .capsule)
+        .buttonStyle(.tvBare)
+        .focused($focused)
+        .animation(.easeOut(duration: 0.15), value: focused)
     }
 }
 

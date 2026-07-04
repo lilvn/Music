@@ -43,6 +43,10 @@ struct TVNowPlayingView: View {
                 } else if SessionHub.shared.yieldedToRemote, let remote = SessionHub.shared.remote {
                     // Another device took over playback (exclusive-playback rule) — mirror it.
                     remoteMirror(remote)
+                } else if let remote = SessionHub.shared.remote, !remote.isPaused, !player.isPlaying {
+                    // Another device is ACTIVELY playing and we're not — its live playback outranks
+                    // the locally-restored (paused) track.
+                    remoteMirror(remote)
                 } else if player.currentItem != nil {
                     // The skeuomorphic cover-flow carousel: cover + CD + reflection. Centred for plain
                     // audio; when a music video is the backdrop OR a pane (lyrics/queue) is open it
@@ -88,6 +92,9 @@ struct TVNowPlayingView: View {
                     controlsRow
                     progressFooter
                 }
+                // A focus SECTION: swiping down from anywhere above (the carousel, a pane) reliably
+                // lands in the transport, without depending on exact button geometry.
+                .focusSection()
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
@@ -148,10 +155,14 @@ struct TVNowPlayingView: View {
     }
 
     /// Swiping DOWN from the carousel lands on the transport: make sure the block is on screen first,
-    /// then hand focus to the play/pause button on the next runloop (after it exists).
+    /// then hand focus to the play/pause button once the insertion has settled (a same-runloop
+    /// assignment can silently fail while the `if footerVisible` block is still being committed).
     private func focusControls() {
         bumpFooter()
-        Task { @MainActor in controlFocus = .playPause }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(80))
+            controlFocus = .playPause
+        }
     }
 
     // MARK: - Chrome (minimal liquid glass)

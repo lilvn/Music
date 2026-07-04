@@ -261,7 +261,16 @@ struct SpinningDisc: View {
             // disc's current free-spin angle: zero jump. (DiscSpinState is a plain non-observed class,
             // so mutating it during render is safe — no invalidation loop.)
             if !s.isScrubbing { s.beginScrub(progress: p, now: date) }
+            s.lastScrub = p   // keep the fold target current for the lazy end below
             return s.scrubAnchorAngle + (p - s.scrubAnchorProgress) * Self.scrubTurns
+        }
+        // The scrub just ended but onChange hasn't folded yet — end it NOW, at render time, or this
+        // frame reads the stale pre-scrub base (the one-frame flicker on release). NOT for .miniBar:
+        // its neighbour strips share the state and render with a nil scrubProgress DURING a scrub,
+        // which would end it out from under the strip being scrubbed.
+        if s !== DiscSpinState.miniBar, s.isScrubbing {
+            s.endScrub()
+            if spinning, s.ref == nil { s.ref = date }   // reopen the free spin from the landed angle
         }
         if spinning, let ref = s.ref {
             return s.base + date.timeIntervalSince(ref) * Self.spinSpeed

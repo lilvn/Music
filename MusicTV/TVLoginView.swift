@@ -61,29 +61,56 @@ struct TVLoginView: View {
     }
 }
 
-/// TV settings: the connected server, and sign out (clears this device's saved login).
+/// TV settings: the connected server + this device's identity, and sign out (clears the saved login).
 struct TVSettingsView: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
     @Environment(\.dismiss) private var dismiss
 
+    private var appVersion: String {
+        let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        return "\(v) (\(b))"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section("Server") {
-                    LabeledContent("Address", value: client.serverURL)
-                    LabeledContent("User", value: client.username)
+                    LabeledContent { Text(client.serverURL) } label: {
+                        Label("Address", systemImage: "server.rack")
+                    }
+                    LabeledContent { Text(client.username) } label: {
+                        Label("User", systemImage: "person.crop.circle")
+                    }
                 }
+
+                Section("This Apple TV") {
+                    LabeledContent { Text(JellyfinClient.deviceName) } label: {
+                        Label("Device", systemImage: "tv")
+                    }
+                    LabeledContent { Text(appVersion) } label: {
+                        Label("Version", systemImage: "app.badge")
+                    }
+                }
+
                 Section {
-                    Button("Sign Out", role: .destructive) {
+                    Button(role: .destructive) {
                         TVVideoController.shared.exit(audio: player, resumeAudio: false)
                         player.stop()
                         client.signOut()
                         dismiss()
+                    } label: {
+                        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
+                } footer: {
+                    Text("Signing out clears this Apple TV's saved login. Your music and playlists stay on the server.")
                 }
+
                 Section {
-                    Button("Done") { dismiss() }
+                    Button { dismiss() } label: {
+                        Label("Done", systemImage: "checkmark")
+                    }
                 }
             }
             .navigationTitle("Settings")

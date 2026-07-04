@@ -1,10 +1,14 @@
 import SwiftUI
 
-/// Floating "Transfer to this device" pill — appears in the TOP-RIGHT corner of any device that isn't
-/// the one currently playing, and pulls the remote session (queue + position) onto this device.
+/// "Transfer to this device" pill — appears on any device that isn't the one currently playing (iOS:
+/// floating top-right; tvOS: a focusable pill in the custom nav bar) and pulls the remote session
+/// (queue + position) onto this device.
 struct TransferButton: View {
     @Environment(Player.self) private var player
     private var hub: SessionHub { SessionHub.shared }
+#if os(tvOS)
+    @FocusState private var focused: Bool
+#endif
 
     var body: some View {
         // (A video can't transfer as local audio — hide the pill for MusicVideo sessions.)
@@ -29,7 +33,12 @@ struct TransferButton: View {
 #if os(iOS)
             .buttonStyle(.plain)
 #else
-            .buttonStyle(.borderless)
+            // Bare style (no white platter) + an explicit ring/grow so it reads focused in the nav bar.
+            .buttonStyle(.tvBare)
+            .focused($focused)
+            .overlay(Capsule().strokeBorder(.white.opacity(focused ? 0.95 : 0), lineWidth: 2))
+            .scaleEffect(focused ? 1.05 : 1.0)
+            .animation(.easeOut(duration: 0.15), value: focused)
 #endif
             .disabled(hub.transferring)
             .accessibilityLabel("Transfer playback from \(remote.deviceName) to this device")

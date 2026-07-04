@@ -2,93 +2,123 @@ import SwiftUI
 
 enum TVTab: Hashable { case home, albums, playlists, nowPlaying, search }
 
-/// Top-level TV navigation: the tvOS tab bar with focus-driven browse tabs and Now Playing.
+/// Top-level TV navigation — a CUSTOM nav bar (the system tab bar is hidden): browse pills + the mini
+/// bar as its own pill standing in for Now Playing (click = open it), a separated Search pill, and the
+/// Transfer button — all focusable in one bar, iOS-style. The TabView below only hosts the pages.
 struct TVRootView: View {
     @Environment(Player.self) private var player
     @State private var tab: TVTab = .home
 
     var body: some View {
-        TabView(selection: $tab) {
-            // Browse tabs reserve top clearance while the mini bar is showing, so pages START below
-            // it (nav bar → mini bar → page) and scroll under its glass. Now Playing has no bar.
-            Tab("Home", systemImage: "house.fill", value: TVTab.home) { TVHomeView().tvMiniBarClearance() }
-            Tab("Albums", systemImage: "square.stack.fill", value: TVTab.albums) { TVAlbumsView().tvMiniBarClearance() }
-            Tab("Playlists", systemImage: "music.note.list", value: TVTab.playlists) { TVPlaylistsView().tvMiniBarClearance() }
-            Tab("Now Playing", systemImage: "waveform", value: TVTab.nowPlaying) { TVNowPlayingView() }
-            Tab("Search", systemImage: "magnifyingglass", value: TVTab.search, role: .search) { TVSearchView().tvMiniBarClearance() }
+        VStack(spacing: 0) {
+            TVNavBar(tab: $tab)
+
+            TabView(selection: $tab) {
+                Tab("Home", systemImage: "house.fill", value: TVTab.home) { TVHomeView().toolbar(.hidden, for: .tabBar) }
+                Tab("Albums", systemImage: "square.stack.fill", value: TVTab.albums) { TVAlbumsView().toolbar(.hidden, for: .tabBar) }
+                Tab("Playlists", systemImage: "music.note.list", value: TVTab.playlists) { TVPlaylistsView().toolbar(.hidden, for: .tabBar) }
+                Tab("Now Playing", systemImage: "waveform", value: TVTab.nowPlaying) { TVNowPlayingView().toolbar(.hidden, for: .tabBar) }
+                Tab("Search", systemImage: "magnifyingglass", value: TVTab.search, role: .search) { TVSearchView().toolbar(.hidden, for: .tabBar) }
+            }
         }
+        .background(Color.black.ignoresSafeArea())
         // Starting playback anywhere jumps straight to Now Playing.
         .environment(\.tvOpenNowPlaying) { tab = .nowPlaying }
         // The Siri Remote play/pause button toggles playback from ANY tab / focus — including a track
-        // restored (paused) at launch, where focus sits on the tab bar and never reached Now Playing's
-        // own handler. The direct Music Videos playlist toggles the video; everything else the audio.
+        // restored (paused) at launch, where focus never reached Now Playing's own handler. The direct
+        // Music Videos playlist toggles the video; everything else the audio.
         .onPlayPauseCommand {
             let v = TVVideoController.shared
             v.direct ? v.togglePlayPause() : player.togglePlayPause()
         }
-        // "Transfer to this device" floats top-right whenever another device is the one playing.
-        .overlay(alignment: .topTrailing) {
-            TransferButton()
-                .padding(.trailing, 60)
-                .padding(.top, 20)
-        }
-        // The mini bar: an iOS-MiniPlayer-style Liquid Glass bar top-CENTER, directly below the tvOS
-        // tab bar and roughly its width. Hidden on the Now Playing tab, which has the full carousel
-        // instead. Non-focusable chrome — no Buttons, so it never steals focus from the tab bar above.
-        .overlay(alignment: .top) {
-            let videoCtl = TVVideoController.shared
-            Group {
-                if tab == .nowPlaying {
-                    EmptyView()
-                } else if videoCtl.direct, let video = videoCtl.activeVideo {
-                    TVNowPlayingBug(item: video, artistLine: video.primaryArtist, spinning: true)
-                } else if let item = player.currentItem {
-                    TVNowPlayingBug(item: item,
-                                    artistLine: item.primaryArtist,
-                                    albumLine: item.album,
-                                    spinning: player.isPlaying || videoCtl.activeVideo != nil)
-                } else if let remote = SessionHub.shared.remote {
-                    TVNowPlayingBug(item: remote.item,
-                                    artistLine: remote.item.primaryArtist,
-                                    albumLine: "Playing on \(remote.deviceName)",
-                                    spinning: !remote.isPaused)
-                }
+    }
+}
+
+// MARK: - The custom nav bar
+
+/// Home / Albums / Playlists as text pills + the mini-bar pill (= Now Playing) in ONE glass capsule,
+/// then Search as its own separated pill and, when another device is playing, the Transfer button —
+/// everything focusable, so the whole top row works like the iOS bar.
+private struct TVNavBar: View {
+    @Binding var tab: TVTab
+
+    var body: some View {
+        HStack(spacing: 18) {
+            HStack(spacing: 4) {
+                TVNavTextItem(title: "Home", selected: tab == .home) { tab = .home }
+                TVNavTextItem(title: "Albums", selected: tab == .albums) { tab = .albums }
+                TVNavTextItem(title: "Playlists", selected: tab == .playlists) { tab = .playlists }
+                // The mini bar IS the Now Playing item: current track + progress fill; click opens it.
+                TVNavMiniPill(selected: tab == .nowPlaying) { tab = .nowPlaying }
             }
-            // ~57% of the screen matches the 5-item tab bar's span; 126pt clears the bar (~y40-110).
-            .containerRelativeFrame(.horizontal) { length, _ in length * 0.57 }
-            .padding(.top, 126)
-            .allowsHitTesting(false)
+            .padding(5)
+            .glassEffect(.regular, in: .capsule)
+
+            // Search — a separated pill, like the iOS search tab.
+            TVNavIconItem(icon: "magnifyingglass", selected: tab == .search) { tab = .search }
+                .padding(5)
+                .glassEffect(.regular, in: .capsule)
+
+            // Focusable here in the bar (its old floating overlay was unreachable by the focus engine).
+            TransferButton()
         }
+        .focusSection()
+        .frame(maxWidth: .infinity)
+        .padding(.top, 24)
+        .padding(.bottom, 12)
     }
 }
 
-/// Whether the mini bar is currently showing (mirrors TVRootView's overlay branches, minus the tab check).
-@MainActor
-func tvMiniBarShowing(_ player: Player) -> Bool {
-    let videoCtl = TVVideoController.shared
-    if videoCtl.direct, videoCtl.activeVideo != nil { return true }
-    if player.currentItem != nil { return true }
-    return SessionHub.shared.remote != nil
-}
+/// A text tab pill: white capsule + black text when focused (the system tab bar look), subtle white
+/// wash when it's the selected tab, bare otherwise.
+private struct TVNavTextItem: View {
+    let title: String
+    let selected: Bool
+    let action: () -> Void
+    @FocusState private var focused: Bool
 
-/// Reserves the mini bar's slot at the top of a browse page: the page lays out BELOW the bar (nav bar →
-/// mini bar → content) and its content scrolls under the bar's glass, exactly like a nav bar.
-private struct TVMiniBarClearance: ViewModifier {
-    @Environment(Player.self) private var player
-    func body(content: Content) -> some View {
-        let showing = tvMiniBarShowing(player)
-        content
-            // Bar bottom sits at ~194 (126 top + 68 height); pages' own top safe area is ~60, so ~150
-            // more puts the first row just under the bar with a small gap. contentMargins propagates
-            // INTO the page's ScrollView (outer safeAreaPadding/safeAreaInset never reached it through
-            // the NavigationStack), and content still scrolls under the bar's glass.
-            .contentMargins(.top, showing ? 150 : 0, for: .scrollContent)
-            .animation(.easeInOut(duration: 0.25), value: showing)
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.callout).fontWeight(.medium)
+                .foregroundStyle(focused ? AnyShapeStyle(.black) : AnyShapeStyle(.primary))
+                .padding(.horizontal, 26)
+                .padding(.vertical, 12)
+                .background(
+                    Capsule().fill(focused ? AnyShapeStyle(.white)
+                                   : selected ? AnyShapeStyle(.white.opacity(0.16))
+                                   : AnyShapeStyle(.clear))
+                )
+        }
+        .buttonStyle(.tvBare)
+        .focused($focused)
+        .animation(.easeOut(duration: 0.15), value: focused)
     }
 }
 
-extension View {
-    func tvMiniBarClearance() -> some View { modifier(TVMiniBarClearance()) }
+/// An icon pill (Search) with the same focus/selection treatment as the text items.
+private struct TVNavIconItem: View {
+    let icon: String
+    let selected: Bool
+    let action: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(focused ? AnyShapeStyle(.black) : AnyShapeStyle(.primary))
+                .padding(14)
+                .background(
+                    Circle().fill(focused ? AnyShapeStyle(.white)
+                                  : selected ? AnyShapeStyle(.white.opacity(0.16))
+                                  : AnyShapeStyle(.clear))
+                )
+        }
+        .buttonStyle(.tvBare)
+        .focused($focused)
+        .animation(.easeOut(duration: 0.15), value: focused)
+    }
 }
 
 // MARK: - Home
@@ -147,12 +177,18 @@ struct TVHomeView: View {
                     if !loaded {
                         ProgressView().frame(maxWidth: .infinity).padding(60)
                     } else {
-                        // Same as the iPhone home: a quiet Settings entry at the very bottom.
-                        Button("Settings") { showSettings = true }
-                            .font(.callout)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 20)
-                            .padding(.bottom, 40)
+                        // Same as the iPhone home: a quiet Settings entry at the very bottom — its own
+                        // focus section so swiping DOWN from the artists shelf lands on it directly.
+                        Button { showSettings = true } label: {
+                            Label("Settings", systemImage: "gearshape.fill")
+                                .font(.callout)
+                        }
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.capsule)
+                        .frame(maxWidth: .infinity)
+                        .focusSection()
+                        .padding(.top, 24)
+                        .padding(.bottom, 48)
                     }
                 }
                 .padding(.horizontal, 60)
