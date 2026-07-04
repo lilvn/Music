@@ -1096,14 +1096,29 @@ final class Player {
 #endif
     }
 
+    /// Repaint the lock screen with the LOCAL track — used when the remote lock-screen bridge
+    /// disengages and hands the info center back.
+    func republishNowPlayingInfo() { updateNowPlayingInfo() }
+
     // MARK: - Remote controls (lock screen / headphones)
+
+    /// True when the lock screen is mirroring a REMOTE session — its presses drive that device.
+    private var routesToRemote: Bool {
+#if os(iOS)
+        RemoteLockScreenBridge.shared.active
+#else
+        false
+#endif
+    }
 
     private func setupRemoteControls() {
 #if canImport(MediaPlayer) && (os(iOS) || os(tvOS) || os(watchOS))
         let cc = MPRemoteCommandCenter.shared()
 
         cc.playCommand.addTarget { [weak self] _ in
-            guard let self, self.player != nil else { return .noSuchContent }
+            guard let self else { return .noSuchContent }
+            if self.routesToRemote { SessionHub.shared.playPauseRemote(); return .success }
+            guard self.player != nil else { return .noSuchContent }
             self.player?.play()
             self.isPlaying = true
             self.intendedPlaying = true
@@ -1111,7 +1126,9 @@ final class Player {
             return .success
         }
         cc.pauseCommand.addTarget { [weak self] _ in
-            guard let self, self.player != nil else { return .noSuchContent }
+            guard let self else { return .noSuchContent }
+            if self.routesToRemote { SessionHub.shared.playPauseRemote(); return .success }
+            guard self.player != nil else { return .noSuchContent }
             self.player?.pause()
             self.isPlaying = false
             self.intendedPlaying = false
@@ -1119,22 +1136,30 @@ final class Player {
             return .success
         }
         cc.togglePlayPauseCommand.addTarget { [weak self] _ in
-            guard let self, self.player != nil else { return .noSuchContent }
+            guard let self else { return .noSuchContent }
+            if self.routesToRemote { SessionHub.shared.playPauseRemote(); return .success }
+            guard self.player != nil else { return .noSuchContent }
             self.togglePlayPause()
             return .success
         }
         cc.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let e = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
-            self?.seek(to: e.positionTime)
+            guard let self else { return .noSuchContent }
+            if self.routesToRemote { SessionHub.shared.seekRemote(to: e.positionTime); return .success }
+            self.seek(to: e.positionTime)
             return .success
         }
         cc.nextTrackCommand.addTarget { [weak self] _ in
-            guard let self, self.nextIndex(after: self.queue.currentIndex) != nil else { return .noSuchContent }
+            guard let self else { return .noSuchContent }
+            if self.routesToRemote { SessionHub.shared.nextRemote(); return .success }
+            guard self.nextIndex(after: self.queue.currentIndex) != nil else { return .noSuchContent }
             self.nextTrack()
             return .success
         }
         cc.previousTrackCommand.addTarget { [weak self] _ in
-            guard let self, self.player != nil else { return .noSuchContent }
+            guard let self else { return .noSuchContent }
+            if self.routesToRemote { SessionHub.shared.previousRemote(); return .success }
+            guard self.player != nil else { return .noSuchContent }
             self.previousTrack()
             return .success
         }

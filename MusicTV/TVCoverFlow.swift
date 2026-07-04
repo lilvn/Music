@@ -370,10 +370,21 @@ struct TVNavTransportPill: View {
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
         .frame(width: 980)
-        // The artwork wash fills the whole transport (it IS the now-playing surface).
-        .background {
+        // The artwork wash IS the progress: revealed left→right across the whole transport as the
+        // track plays, same language as the compact pill and the iOS bar.
+        .background(alignment: .leading) {
             if let item {
-                TVArtworkFill(item: item).opacity(0.55).allowsHitTesting(false)
+                GeometryReader { g in
+                    let frac: Double = direct
+                        ? videoCtl.directProgress
+                        : (player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0)
+                    TVArtworkFill(item: item)
+                        .opacity(0.7)
+                        .mask(alignment: .leading) {
+                            Rectangle().frame(width: max(0, g.size.width * frac))
+                        }
+                }
+                .allowsHitTesting(false)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))

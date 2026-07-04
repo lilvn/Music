@@ -48,69 +48,90 @@ struct TransferButton: View {
 }
 
 #if os(iOS)
-/// Mini-bar mirror of a REMOTE session — shown in the bottom accessory when nothing is loaded locally
-/// (or this device yielded playback to another). The controls drive the remote device; the thin strip
-/// along the bottom is its LIVE playhead (extrapolated between session polls — works for the TV's
-/// music videos too). Tap to open the remote queue.
+/// Mini-bar mirror of a REMOTE session — visually IDENTICAL to the local MiniPlayer (spinning CD,
+/// title/artist, transport on the right, the artwork-gradient fill AS the live progress) so playing on
+/// another device feels seamless; only the top-right Transfer pill gives it away. The controls drive
+/// the remote device. Tap to open the remote queue.
 struct RemoteMiniBar: View {
+    var appColorScheme: ColorScheme = .light
     @Environment(JellyfinClient.self) private var client
     private var hub: SessionHub { SessionHub.shared }
     @State private var showQueue = false
+    @State private var width: CGFloat = 1
+    @State private var barHeight: CGFloat = 56
 
     var body: some View {
         if let remote = hub.remote {
-            TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
-                let frac = remote.durationSeconds > 0
-                    ? min(max(remote.livePosition(at: ctx.date) / remote.durationSeconds, 0), 1) : 0
-                HStack(spacing: 10) {
-                    LibraryImage(url: client.artworkURL(for: remote.item, size: 160), maxPixel: 160) {
-                        Color(.systemGray5)
-                    }
+            HStack(spacing: 10) {
+                SpinningDisc(artURL: client.artworkURL(for: remote.item, size: 160),
+                             size: 40,
+                             spinning: !remote.isPaused)
                     .frame(width: 40, height: 40)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(remote.item.name)
-                            .font(.subheadline).fontWeight(.medium).lineLimit(1)
-                        Text("Playing on \(remote.deviceName)")
-                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    }
-
-                    Spacer(minLength: 6)
-
-                    Button { hub.previousRemote() } label: {
-                        Image(systemName: "backward.fill").font(.body)
-                    }
-                    Button { hub.playPauseRemote() } label: {
-                        Image(systemName: remote.isPaused ? "play.fill" : "pause.fill")
-                            .font(.title3)
-                            .frame(width: 32, height: 32)
-                    }
-                    Button { hub.nextRemote() } label: {
-                        Image(systemName: "forward.fill").font(.body)
-                    }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(remote.item.name)
+                        .font(.subheadline).fontWeight(.semibold).lineLimit(1)
+                    Text(remote.item.primaryArtist)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 12)
-                .contentShape(Rectangle())
-                // The live playhead strip, pinned along the bottom edge of the capsule.
-                .overlay(alignment: .bottom) {
-                    GeometryReader { g in
-                        Capsule().fill(.secondary.opacity(0.22))
-                            .overlay(alignment: .leading) {
-                                Capsule().fill(.primary.opacity(0.65))
-                                    .frame(width: max(4, (g.size.width - 24) * frac))
-                            }
-                            .frame(height: 3)
-                            .padding(.horizontal, 12)
-                            .frame(maxHeight: .infinity, alignment: .bottom)
-                            .padding(.bottom, 5)
-                    }
-                    .allowsHitTesting(false)
+
+                Spacer(minLength: 6)
+
+                Button { hub.previousRemote() } label: {
+                    Image(systemName: "backward.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 32, height: 44)
+                        .contentShape(Rectangle())
+                }
+                Button { hub.playPauseRemote() } label: {
+                    Image(systemName: remote.isPaused ? "play.fill" : "pause.fill")
+                        .font(.system(size: 19, weight: .semibold))
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: 34, height: 44)
+                        .contentShape(Rectangle())
+                }
+                Button { hub.nextRemote() } label: {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 32, height: 44)
+                        .contentShape(Rectangle())
                 }
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(.primary)
+            // Same optical inset as MiniPlayer: the CD concentric with the capsule's left end cap.
+            .padding(.leading, max(4, (barHeight - 40) / 2))
+            .padding(.trailing, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // The artwork-gradient fill IS the progress bar — revealed left→right, LIVE (extrapolated
+            // between session polls), exactly like the local bar. No separate strip.
+            .background(alignment: .leading) {
+                TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
+                    let frac = remote.durationSeconds > 0
+                        ? min(max(remote.livePosition(at: ctx.date) / remote.durationSeconds, 0), 1) : 0
+                    ArtworkGradient(url: client.artworkURL(for: remote.item, size: 160), blur: 20)
+                        .frame(width: width)
+                        .frame(maxHeight: .infinity)
+                        .overlay((appColorScheme == .dark ? Color.black : Color.white).opacity(0.34))
+                        .opacity(0.82)
+                        .mask(alignment: .leading) {
+                            Rectangle().frame(width: max(0, width * frac))
+                        }
+                }
+                .allowsHitTesting(false)
+            }
+            .background {
+                GeometryReader { g in
+                    Color.clear.onChange(of: g.size, initial: true) { _, s in
+                        width = s.width; barHeight = s.height
+                    }
+                }
+            }
+            .clipShape(Capsule())
+            .contentShape(Capsule())
             .onTapGesture { showQueue = true }
             .sheet(isPresented: $showQueue) { RemoteQueueView() }
+            .environment(\.colorScheme, appColorScheme)
         }
     }
 }

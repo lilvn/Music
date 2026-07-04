@@ -39,17 +39,17 @@ struct RootTabView: View {
         .tabViewBottomAccessory {
             if SessionHub.shared.yieldedToRemote, SessionHub.shared.remote != nil {
                 // Another device took over playback (exclusive-playback rule) — mirror IT, live.
-                RemoteMiniBar()
+                RemoteMiniBar(appColorScheme: colorScheme)
             } else if let r = SessionHub.shared.remote, !r.isPaused, !player.isPlaying {
                 // Another device is ACTIVELY playing and we're not — its live playback outranks the
                 // locally-restored (paused) track, so playback is visibly shared without a transfer.
-                RemoteMiniBar()
+                RemoteMiniBar(appColorScheme: colorScheme)
             } else if player.currentItem != nil {
                 MiniPlayer(namespace: npZoom, appColorScheme: colorScheme)
             } else if SessionHub.shared.remote != nil {
                 // Nothing loaded locally, but another device of this account is playing —
                 // mirror it here; the controls drive that device.
-                RemoteMiniBar()
+                RemoteMiniBar(appColorScheme: colorScheme)
             }
         }
         // "Transfer to this device" floats top-right whenever another device is the one playing.

@@ -222,6 +222,11 @@ final class SessionHub {
         }
         prevRemoteKey = newRemote.map { ($0.id, $0.item.id, $0.isPaused) }
         if newRemote == nil { yieldedToRemote = false }
+
+#if os(iOS)
+        // Keep the remote track on this phone's lock screen while it plays elsewhere.
+        if let player { RemoteLockScreenBridge.shared.update(remote: newRemote, player: player, client: client) }
+#endif
     }
 
     // MARK: - Exclusive playback (active path)
@@ -232,6 +237,10 @@ final class SessionHub {
     func noteLocalPlayStart() {
         lastLocalPlayStart = Date()
         yieldedToRemote = false
+#if os(iOS)
+        // Local playback owns the lock screen again, immediately (not on the next poll).
+        if let player { RemoteLockScreenBridge.shared.disengage(player: player) }
+#endif
         if let client, let r = remote, !r.isPaused {
             Task { await client.sendPlaystate(sessionId: r.id, command: "Pause") }
         }
