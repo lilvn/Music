@@ -2,157 +2,30 @@ import SwiftUI
 
 enum TVTab: Hashable { case home, albums, playlists, nowPlaying, search }
 
-/// Top-level TV navigation — a CUSTOM nav bar (the system tab bar is hidden): browse pills + the mini
-/// bar as its own pill standing in for Now Playing (click = open it), a separated Search pill, and the
-/// Transfer button — all focusable in one bar, iOS-style. The TabView below only hosts the pages.
+/// Top-level TV navigation — the NATIVE tvOS tab bar, nothing custom: five tabs, system Liquid
+/// Glass, system focus/auto-hide behavior. Now Playing is a plain tab (the native player lives
+/// inside it); no mini bar.
 struct TVRootView: View {
     @Environment(Player.self) private var player
     @State private var tab: TVTab = .home
 
     var body: some View {
-        // The bar OVERLAYS the pages (ZStack, not a VStack): page backgrounds — the Now Playing
-        // artwork wash, a playing video — run full-bleed behind the glass bar instead of dying at a
-        // black header band. Pages clear the bar via scroll-content margins (which DO propagate into
-        // their ScrollViews, incl. detail pages), so content still starts below it and scrolls under.
-        ZStack(alignment: .top) {
-            TabView(selection: $tab) {
-                Tab("Home", systemImage: "house.fill", value: TVTab.home) {
-                    TVHomeView().toolbar(.hidden, for: .tabBar).contentMargins(.top, 110, for: .scrollContent)
-                }
-                Tab("Albums", systemImage: "square.stack.fill", value: TVTab.albums) {
-                    TVAlbumsView().toolbar(.hidden, for: .tabBar).contentMargins(.top, 110, for: .scrollContent)
-                }
-                Tab("Playlists", systemImage: "music.note.list", value: TVTab.playlists) {
-                    TVPlaylistsView().toolbar(.hidden, for: .tabBar).contentMargins(.top, 110, for: .scrollContent)
-                }
-                Tab("Now Playing", systemImage: "waveform", value: TVTab.nowPlaying) {
-                    TVNowPlayingView().toolbar(.hidden, for: .tabBar)
-                }
-                Tab("Search", systemImage: "magnifyingglass", value: TVTab.search, role: .search) {
-                    TVSearchView().toolbar(.hidden, for: .tabBar).contentMargins(.top, 110, for: .scrollContent)
-                }
-            }
-
-            // Cinema mode: while a music video plays and the remote is idle, the whole nav bar slides
-            // away; any interaction (bumpChrome) brings it back. Audio-only never hides it.
-            if TVNowPlayingUI.shared.chromeVisible {
-                TVNavBar(tab: $tab)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
+        TabView(selection: $tab) {
+            Tab("Home", systemImage: "house.fill", value: TVTab.home) { TVHomeView() }
+            Tab("Albums", systemImage: "square.stack.fill", value: TVTab.albums) { TVAlbumsView() }
+            Tab("Playlists", systemImage: "music.note.list", value: TVTab.playlists) { TVPlaylistsView() }
+            Tab("Now Playing", systemImage: "waveform", value: TVTab.nowPlaying) { TVNowPlayingView() }
+            Tab("Search", systemImage: "magnifyingglass", value: TVTab.search, role: .search) { TVSearchView() }
         }
-        .animation(.easeInOut(duration: 0.35), value: TVNowPlayingUI.shared.chromeVisible)
-        .background(Color.black.ignoresSafeArea())
         // Starting playback anywhere jumps straight to Now Playing.
         .environment(\.tvOpenNowPlaying) { tab = .nowPlaying }
-        .onChange(of: tab) { _, _ in TVNowPlayingUI.shared.bumpChrome() }
         // The Siri Remote play/pause button toggles playback from ANY tab / focus — including a track
-        // restored (paused) at launch, where focus never reached Now Playing's own handler. The direct
-        // Music Videos playlist toggles the video; everything else the audio.
+        // restored (paused) at launch. The direct Music Videos playlist toggles the video; everything
+        // else the audio.
         .onPlayPauseCommand {
-            TVNowPlayingUI.shared.bumpChrome()
             let v = TVVideoController.shared
             v.direct ? v.togglePlayPause() : player.togglePlayPause()
         }
-    }
-}
-
-// MARK: - The custom nav bar
-
-/// ONE row: Home / Albums / Playlists in a glass capsule, the mini bar as its OWN pill beside them
-/// (PURELY VISUAL — CD + title + artwork-fill progress, no controls; focus/click just open Now
-/// Playing, where the NATIVE transport lives), Search as a separated pill, and the Transfer button.
-private struct TVNavBar: View {
-    @Binding var tab: TVTab
-    /// One glass namespace for the whole bar — neighbouring pills blend, the iOS Liquid Glass look.
-    @Namespace private var glassNS
-
-    var body: some View {
-        GlassEffectContainer(spacing: 18) {
-            HStack(spacing: 18) {
-                HStack(spacing: 4) {
-                    TVNavTextItem(title: "Home", selected: tab == .home) { tab = .home }
-                    TVNavTextItem(title: "Albums", selected: tab == .albums) { tab = .albums }
-                    TVNavTextItem(title: "Playlists", selected: tab == .playlists) { tab = .playlists }
-                }
-                .padding(5)
-                .glassEffect(.regular, in: .capsule)
-                .glassEffectID("nav", in: glassNS)
-
-                // The mini bar: focus or click = show Now Playing. Nothing else — just visual.
-                TVNavMiniPill(selected: tab == .nowPlaying) { tab = .nowPlaying }
-                    .padding(5)
-                    .glassEffect(.regular, in: .capsule)
-                    .glassEffectID("mini", in: glassNS)
-
-                // Search — a separated pill, like the iOS search tab.
-                TVNavIconItem(icon: "magnifyingglass", selected: tab == .search) { tab = .search }
-                    .padding(5)
-                    .glassEffect(.regular, in: .capsule)
-                    .glassEffectID("search", in: glassNS)
-
-                // Focusable here in the bar (a floating overlay was unreachable by the focus engine).
-                TransferButton()
-            }
-        }
-        .focusSection()
-        .frame(maxWidth: .infinity)
-        .padding(.top, 24)
-        .padding(.bottom, 12)
-    }
-}
-
-/// A text tab pill: white capsule + black text when focused (the system tab bar look), subtle white
-/// wash when it's the selected tab. FOCUSING it switches the page (like the system tab bar) — no
-/// click needed.
-private struct TVNavTextItem: View {
-    let title: String
-    let selected: Bool
-    let action: () -> Void
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.callout).fontWeight(.medium)
-                .foregroundStyle(focused ? AnyShapeStyle(.black) : AnyShapeStyle(.primary))
-                .padding(.horizontal, 26)
-                .padding(.vertical, 12)
-                .background(
-                    Capsule().fill(focused ? AnyShapeStyle(.white)
-                                   : selected ? AnyShapeStyle(.white.opacity(0.16))
-                                   : AnyShapeStyle(.clear))
-                )
-        }
-        .buttonStyle(.tvBare)
-        .focused($focused)
-        .onChange(of: focused) { _, f in if f { action() } }   // focus = select, system-tab-bar style
-        .animation(.easeOut(duration: 0.15), value: focused)
-    }
-}
-
-/// An icon pill (Search) with the same focus-switches-page treatment as the text items.
-private struct TVNavIconItem: View {
-    let icon: String
-    let selected: Bool
-    let action: () -> Void
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(focused ? AnyShapeStyle(.black) : AnyShapeStyle(.primary))
-                .padding(14)
-                .background(
-                    Circle().fill(focused ? AnyShapeStyle(.white)
-                                  : selected ? AnyShapeStyle(.white.opacity(0.16))
-                                  : AnyShapeStyle(.clear))
-                )
-        }
-        .buttonStyle(.tvBare)
-        .focused($focused)
-        .onChange(of: focused) { _, f in if f { action() } }   // focus = select
-        .animation(.easeOut(duration: 0.15), value: focused)
     }
 }
 
