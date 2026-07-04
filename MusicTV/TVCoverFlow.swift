@@ -232,63 +232,42 @@ struct TVPillModel {
     }
 }
 
-/// The COMPACT mini bar: its own Liquid Glass pill in the nav bar — spinning CD (like the iPhone bar)
-/// + title/artist with the artwork-wash progress fill. FOCUSING it opens Now Playing (like every other
-/// nav pill); CLICKING it expands the pill into the transport for local playback.
+/// The mini bar: its own Liquid Glass pill in the nav bar — PURELY VISUAL, like the iPhone bar at
+/// rest: the round spinning CD + title/artist with the artwork-wash fill AS the live progress
+/// (extrapolated for remote sessions). No controls — focusing or clicking it just opens Now Playing,
+/// where the native transport lives.
 struct TVNavMiniPill: View {
     let selected: Bool
-    /// Focus landed on the pill → show the Now Playing page (no click needed).
-    let onSelect: () -> Void
-    /// Click: `engage` is true when local playback exists (the pill can become the transport).
-    let onClick: (_ engage: Bool) -> Void
+    /// Focus or click → show the Now Playing page.
+    let onOpen: () -> Void
 
     @Environment(Player.self) private var player
     @FocusState private var focused: Bool
     @State private var width: CGFloat = 1
 
+    init(selected: Bool, onOpen: @escaping () -> Void) {
+        self.selected = selected
+        self.onOpen = onOpen
+    }
+
     var body: some View {
         let model = TVPillModel.current(player)
-        Button {
-            onClick(model != nil)   // the transport handles local, direct video AND remote sessions
-        } label: {
+        Button(action: onOpen) {
             if let m = model {
-                // Highlighted = EXACTLY the transport's look (same row, same circles, same strip) —
-                // the expansion itself is the focus cue, so no ring, no scale. Clicking only changes
-                // focus DEPTH: the same circles become individually selectable.
-                VStack(spacing: 4) {
-                    HStack(spacing: focused ? 14 : 12) {
-                        // The round CD + title never leave, in any state — the iOS mini bar look.
-                        TVSpinningDisc(item: m.item, size: 38, spinning: m.spinning)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(m.item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
-                            if let sub = m.sub, !sub.isEmpty {
-                                Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                        }
-                        .frame(maxWidth: 260, alignment: .leading)
-
-                        if focused {
-                            Spacer(minLength: 20)
-                            HStack(spacing: 14) {
-                                previewCircle("backward.fill")
-                                previewCircle(m.spinning ? "pause.fill" : "play.fill")
-                                previewCircle("forward.fill")
-                                if m.remote == nil, !TVVideoController.shared.direct {
-                                    previewCircle(TVNowPlayingUI.shared.pane == .lyrics ? "quote.bubble.fill" : "quote.bubble")
-                                        .padding(.leading, 14)
-                                    previewCircle("list.triangle")
-                                }
-                            }
+                HStack(spacing: 12) {
+                    // The round CD itself, spinning — the iOS mini bar look.
+                    TVSpinningDisc(item: m.item, size: 38, spinning: m.spinning)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(m.item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
+                        if let sub = m.sub, !sub.isEmpty {
+                            Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
-                    if focused {
-                        Color.clear.frame(height: 10).frame(maxWidth: .infinity)   // the scrub strip's slot
-                    }
+                    .frame(maxWidth: 260, alignment: .leading)
                 }
-                .padding(.leading, focused ? 16 : 8)
-                .padding(.trailing, focused ? 16 : 18)
-                .padding(.top, focused ? 8 : 7)
-                .padding(.bottom, focused ? 4 : 7)
+                .padding(.leading, 8)
+                .padding(.trailing, 18)
+                .padding(.vertical, 7)
                 .background(
                     Capsule().fill(selected && !focused ? AnyShapeStyle(.white.opacity(0.16))
                                                         : AnyShapeStyle(.clear))
@@ -312,6 +291,7 @@ struct TVNavMiniPill: View {
                     }
                 }
                 .clipShape(Capsule())
+                .overlay(Capsule().strokeBorder(.white.opacity(focused ? 0.95 : 0), lineWidth: 2))
             } else {
                 // Nothing playing anywhere — a plain text tab like its siblings.
                 Text("Now Playing")
@@ -328,206 +308,11 @@ struct TVNavMiniPill: View {
         }
         .buttonStyle(.tvBare)
         .focused($focused)
-        .onChange(of: focused) { _, f in if f { onSelect() } }   // focus = open Now Playing
-        .animation(.easeOut(duration: 0.2), value: focused)
-    }
-
-    /// The transport's control circle, non-interactive (nothing inside is selected yet — the quiet
-    /// wash matches the engaged pill's unfocused buttons exactly).
-    private func previewCircle(_ icon: String) -> some View {
-        Image(systemName: icon)
-            .font(.body.weight(.semibold))
-            .foregroundStyle(.primary)
-            .frame(width: 50, height: 50)
-            .background(Circle().fill(.white.opacity(0.10)))
+        .onChange(of: focused) { _, f in if f { onOpen() } }   // focus = open Now Playing
+        .animation(.easeOut(duration: 0.15), value: focused)
     }
 }
 
-// MARK: - The EXPANDED mini bar: the transport pill
-
-/// The mini bar grown into the transport (click the compact pill to get here): ONE row exactly like
-/// the iOS mini bar — CD + track text on the left, previous / play-pause / next / lyrics / queue on
-/// the right — with NO separate progress bar: the liquid-glass artwork fill across the pill IS the
-/// progress. Scrubbing = press DOWN from the controls onto the fill itself, then drag (swipe)
-/// left/right; the sub line becomes the live time readout while scrubbing. Menu (back) collapses the
-/// pill and hands the nav bar back.
-struct TVNavTransportPill: View {
-    @Binding var engaged: Bool
-    /// The nav bar's glass namespace — this pill shares the compact pill's glass ID, so the glass
-    /// MORPHS between the two states (the iOS Liquid Glass search-bar behavior).
-    var glassNS: Namespace.ID
-
-    @Environment(Player.self) private var player
-    @Environment(JellyfinClient.self) private var client
-    private enum Ctl: Hashable { case prev, play, next, lyrics, queue, scrub }
-    @FocusState private var focus: Ctl?
-
-    private var videoCtl: TVVideoController { TVVideoController.shared }
-    private var scrubbing: Bool { focus == .scrub }
-
-    /// A remote session the transport should drive — SEAMLESS: same pill, the commands just go over
-    /// the session instead of the local player.
-    private var remoteTarget: SessionHub.RemoteSession? {
-        guard !videoCtl.direct, let r = SessionHub.shared.remote else { return nil }
-        if (!r.isPaused && !player.isPlaying) || player.currentItem == nil { return r }
-        return nil
-    }
-
-    var body: some View {
-        let direct = videoCtl.direct
-        let remote = remoteTarget
-        let item = direct ? videoCtl.activeVideo : (remote?.item ?? player.currentItem)
-        let playing = direct ? !videoCtl.directPaused : (remote.map { !$0.isPaused } ?? player.isPlaying)
-        let showPanes = !direct && remote == nil   // lyrics/queue panes are local-playback features
-
-        VStack(spacing: 4) {
-            HStack(spacing: 14) {
-                if let item {
-                    // The CD + title never leave — same left cluster as the compact pill.
-                    TVSpinningDisc(item: item, size: 38, spinning: playing)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
-                        // While scrubbing locally, the sub line becomes the live time readout.
-                        Text(scrubbing && remote == nil
-                             ? "\(player.currentTime.formattedDuration) · \(player.duration.formattedDuration)"
-                             : item.primaryArtist)
-                            .font(.caption2)
-                            .foregroundStyle(scrubbing && remote == nil ? .primary : .secondary)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: 260, alignment: .leading)
-                }
-
-                Spacer(minLength: 20)
-
-                controlButton(.prev, "backward.fill") {
-                    if direct { videoCtl.skipDirect(-1, client: client, audio: player) }
-                    else if remote != nil { SessionHub.shared.previousRemote() }
-                    else { player.previousTrack() }
-                }
-                controlButton(.play, playing ? "pause.fill" : "play.fill") {
-                    if direct { videoCtl.togglePlayPause() }
-                    else if remote != nil { SessionHub.shared.playPauseRemote() }
-                    else { player.togglePlayPause() }
-                }
-                controlButton(.next, "forward.fill") {
-                    if direct { videoCtl.skipDirect(+1, client: client, audio: player) }
-                    else if remote != nil { SessionHub.shared.nextRemote() }
-                    else { player.nextTrack() }
-                }
-
-                if showPanes {
-                    controlButton(.lyrics, TVNowPlayingUI.shared.pane == .lyrics ? "quote.bubble.fill" : "quote.bubble") {
-                        TVNowPlayingUI.shared.toggle(.lyrics)
-                    }
-                    .padding(.leading, 14)
-                    controlButton(.queue, "list.triangle") {
-                        TVNowPlayingUI.shared.toggle(.queue)
-                    }
-                }
-            }
-
-            // The scrub stop, BELOW the buttons in layout (an overlay spanning the pill stole the
-            // focus engine's left/right moves between the buttons): invisible, full width — press
-            // DOWN from the controls to grab the fill, drag left/right to scrub (±5s per pan tick,
-            // ±10s over a session), UP or a click returns to play.
-            if !direct {
-                Color.clear
-                    .frame(height: 10)
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
-                    .focusable(true)
-                    .focused($focus, equals: .scrub)
-                    .onMoveCommand { dir in
-                        switch dir {
-                        case .left:  seekBy(-1)
-                        case .right: seekBy(+1)
-                        case .up, .down: focus = .play   // onMoveCommand consumes ALL moves — route out
-                        @unknown default: break
-                        }
-                    }
-                    .onTapGesture { focus = .play }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, direct ? 8 : 4)
-        // The artwork wash IS the progress bar: revealed left→right across the pill as the track
-        // plays — brighter while scrubbing, live-extrapolated for a remote session. No separate bar.
-        .background(alignment: .leading) {
-            if let item {
-                TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
-                    GeometryReader { g in
-                        let frac: Double = {
-                            if direct { return videoCtl.directProgress }
-                            if let remote {
-                                let dur = max(remote.durationSeconds, 1)
-                                return min(max(remote.livePosition(at: ctx.date) / dur, 0), 1)
-                            }
-                            return player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0
-                        }()
-                        TVArtworkFill(item: item)
-                            .opacity(scrubbing ? 1.0 : 0.7)
-                            .mask(alignment: .leading) {
-                                Rectangle().frame(width: max(0, g.size.width * frac))
-                            }
-                    }
-                }
-                .allowsHitTesting(false)
-            }
-        }
-        .clipShape(Capsule())
-        .glassEffect(.regular, in: .capsule)
-        .glassEffectID("mini", in: glassNS)   // same ID as the compact pill → glass morphs, not swaps
-        .scaleEffect(scrubbing ? 1.02 : 1.0)
-        .animation(.easeOut(duration: 0.15), value: scrubbing)
-        .focusSection()
-        // Moving between the controls counts as interaction — keeps the bar from cinema-hiding
-        // out from under the user mid-navigation.
-        .onChange(of: focus) { _, _ in TVNowPlayingUI.shared.bumpChrome() }
-        // Menu/back collapses the transport and hands the nav bar back.
-        .onExitCommand { engaged = false }
-        .onAppear {
-            // Nothing to drive (local, direct or remote) → collapse straight back.
-            if !videoCtl.direct, player.currentItem == nil, SessionHub.shared.remote == nil {
-                engaged = false
-                return
-            }
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(80))
-                focus = .play
-            }
-        }
-    }
-
-    /// One scrub tick: local seeks ±5s; a remote session seeks ±10s from its live position.
-    private func seekBy(_ sign: Double) {
-        if let r = remoteTarget {
-            let dur = max(r.durationSeconds, 1)
-            let target = min(max(r.livePosition(at: Date()) + sign * 10, 0), dur)
-            SessionHub.shared.seekRemote(to: target)
-        } else {
-            player.seek(to: min(max(player.currentTime + sign * 5, 0), player.duration))
-        }
-    }
-
-    /// One round transport control: white circle + black glyph when focused, quiet wash otherwise.
-    private func controlButton(_ id: Ctl, _ icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(focus == id ? AnyShapeStyle(.black) : AnyShapeStyle(.primary))
-                .frame(width: 50, height: 50)
-                .background(Circle().fill(focus == id ? AnyShapeStyle(.white)
-                                                      : AnyShapeStyle(.white.opacity(0.10))))
-                .contentTransition(.symbolEffect(.replace))
-        }
-        .buttonStyle(.tvBare)
-        .focused($focus, equals: id)
-        .animation(.easeOut(duration: 0.12), value: focus)
-    }
-}
 
 /// A blurred wash of the artwork — the tvOS stand-in for the iPhone's ArtworkGradient (iOS-only). Fills
 /// the mini shelf left→right to show progress.

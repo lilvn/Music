@@ -8,8 +8,6 @@ enum TVTab: Hashable { case home, albums, playlists, nowPlaying, search }
 struct TVRootView: View {
     @Environment(Player.self) private var player
     @State private var tab: TVTab = .home
-    /// Focus lives INSIDE the mini bar's expanded transport (nav pills hidden, Menu collapses it).
-    @State private var engaged = false
 
     var body: some View {
         // The bar OVERLAYS the pages (ZStack, not a VStack): page backgrounds — the Now Playing
@@ -38,19 +36,15 @@ struct TVRootView: View {
             // Cinema mode: while a music video plays and the remote is idle, the whole nav bar slides
             // away; any interaction (bumpChrome) brings it back. Audio-only never hides it.
             if TVNowPlayingUI.shared.chromeVisible {
-                TVNavBar(tab: $tab, engaged: $engaged)
+                TVNavBar(tab: $tab)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.35), value: TVNowPlayingUI.shared.chromeVisible)
         .background(Color.black.ignoresSafeArea())
-        // Starting playback anywhere jumps straight to Now Playing with the transport open.
-        .environment(\.tvOpenNowPlaying) { tab = .nowPlaying; engaged = true }
-        .onChange(of: tab) { _, t in
-            if t != .nowPlaying { engaged = false }
-            TVNowPlayingUI.shared.bumpChrome()
-        }
-        .onChange(of: engaged) { _, _ in TVNowPlayingUI.shared.bumpChrome() }
+        // Starting playback anywhere jumps straight to Now Playing.
+        .environment(\.tvOpenNowPlaying) { tab = .nowPlaying }
+        .onChange(of: tab) { _, _ in TVNowPlayingUI.shared.bumpChrome() }
         // The Siri Remote play/pause button toggles playback from ANY tab / focus — including a track
         // restored (paused) at launch, where focus never reached Now Playing's own handler. The direct
         // Music Videos playlist toggles the video; everything else the audio.
@@ -64,15 +58,12 @@ struct TVRootView: View {
 
 // MARK: - The custom nav bar
 
-/// ONE row: Home / Albums / Playlists in a glass capsule, the mini bar as its OWN pill beside them,
-/// Search as a separated pill, and the Transfer button — everything focusable, always visible.
-/// Clicking the mini bar expands it in place into the transport (`engaged`); the CD + title never
-/// leave it. Menu or focusing a nav pill collapses it back.
+/// ONE row: Home / Albums / Playlists in a glass capsule, the mini bar as its OWN pill beside them
+/// (PURELY VISUAL — CD + title + artwork-fill progress, no controls; focus/click just open Now
+/// Playing, where the NATIVE transport lives), Search as a separated pill, and the Transfer button.
 private struct TVNavBar: View {
     @Binding var tab: TVTab
-    @Binding var engaged: Bool
-    /// One glass namespace for the whole bar — pills MORPH between states (compact mini bar ↔
-    /// transport) instead of cross-fading, the iOS Liquid Glass behavior.
+    /// One glass namespace for the whole bar — neighbouring pills blend, the iOS Liquid Glass look.
     @Namespace private var glassNS
 
     var body: some View {
@@ -87,22 +78,11 @@ private struct TVNavBar: View {
                 .glassEffect(.regular, in: .capsule)
                 .glassEffectID("nav", in: glassNS)
 
-                if engaged {
-                    // The mini bar, expanded into the transport — same glass ID as the compact pill,
-                    // so the glass MORPHS between the two instead of swapping.
-                    TVNavTransportPill(engaged: $engaged, glassNS: glassNS)
-                } else {
-                    // FOCUS = show Now Playing; CLICK = enter the transport.
-                    TVNavMiniPill(selected: tab == .nowPlaying,
-                                  onSelect: { tab = .nowPlaying },
-                                  onClick: { engage in
-                                      tab = .nowPlaying
-                                      if engage { engaged = true }
-                                  })
+                // The mini bar: focus or click = show Now Playing. Nothing else — just visual.
+                TVNavMiniPill(selected: tab == .nowPlaying) { tab = .nowPlaying }
                     .padding(5)
                     .glassEffect(.regular, in: .capsule)
                     .glassEffectID("mini", in: glassNS)
-                }
 
                 // Search — a separated pill, like the iOS search tab.
                 TVNavIconItem(icon: "magnifyingglass", selected: tab == .search) { tab = .search }
@@ -118,7 +98,6 @@ private struct TVNavBar: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 24)
         .padding(.bottom, 12)
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: engaged)
     }
 }
 

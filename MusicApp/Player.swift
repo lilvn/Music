@@ -75,6 +75,9 @@ final class Player {
     // GAPLESS ENGINE: the AVQueuePlayer holds the current item + a pre-rolled lookahead (next) item.
     // Manual next/prev, seek, shuffle, queue edits, and repeat are driven by re-syncing that window.
     @ObservationIgnored private var player: AVQueuePlayer?
+    /// The underlying engine player, read-only — for platform-NATIVE transport chrome (the tvOS
+    /// AVPlayerViewController scrubber). The engine still owns the lifecycle; never mutate this.
+    var nativeAVPlayer: AVPlayer? { player }
     @ObservationIgnored private var currentPlayerItem: AVPlayerItem?
     @ObservationIgnored private var lookaheadItem: AVPlayerItem?
     @ObservationIgnored private var lookaheadIndex: Int?
