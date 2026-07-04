@@ -193,7 +193,6 @@ struct TVHomeView: View {
                 }
                 .padding(.horizontal, 60)
             }
-            .background { TVBackdrop(item: player.currentItem) }
             .navigationDestination(item: $route) { tvDestination(for: $0) }
             .sheet(isPresented: $showSettings) { TVSettingsView() }
             .task {
@@ -242,7 +241,6 @@ struct TVAlbumsView: View {
                 }
                 .padding(60)
             }
-            .background { TVBackdrop(item: player.currentItem) }
             .navigationDestination(item: $route) { tvDestination(for: $0) }
             .task { if albums.isEmpty { albums = (try? await client.fetchAlbums()) ?? [] } }
         }
@@ -283,7 +281,6 @@ struct TVPlaylistsView: View {
                 }
                 .padding(60)
             }
-            .background { TVBackdrop(item: player.currentItem) }
             .navigationDestination(item: $route) { tvDestination(for: $0) }
             .task {
                 if playlists.isEmpty { playlists = (try? await client.fetchPlaylists()) ?? [] }
@@ -331,7 +328,6 @@ struct TVSearchView: View {
                 }
                 .padding(60)
             }
-            .background { TVBackdrop(item: player.currentItem) }
             .navigationDestination(item: $route) { tvDestination(for: $0) }
             .searchable(text: $query, prompt: "Artists, Albums, Songs")
             .task(id: query) {

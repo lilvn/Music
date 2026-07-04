@@ -112,9 +112,9 @@ struct TVNowPlayingView: View {
                 if inVideoMode, let av = videoCtl.avPlayer {
                     TVVideoLayer(player: av).ignoresSafeArea().transition(.opacity)
                 } else {
-                    // The audio-reactive lava lamp — animated ONLY here (thermal rule); every other
-                    // page keeps the static TVBackdrop.
-                    TVLavaLampBackdrop(item: player.currentItem ?? SessionHub.shared.remote?.item)
+                    // The artwork blurred into a colour wash — Now Playing and the detail views are
+                    // the only artwork-tinted pages; browse pages stay system-theme.
+                    TVBackdrop(item: player.currentItem ?? SessionHub.shared.remote?.item)
                 }
                 // A pane needs contrast over whatever's behind (especially a playing video).
                 if pane != nil {
