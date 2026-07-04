@@ -251,33 +251,37 @@ struct TVNavMiniPill: View {
             onClick(player.currentItem != nil || videoCtl.direct)
         } label: {
             if let m = model {
-                HStack(spacing: 12) {
-                    // The round CD itself, spinning — the iOS mini bar look.
-                    TVSpinningDisc(item: m.item, size: 38, spinning: m.spinning)
+                Group {
                     if selected && focused {
-                        // Now Playing is already open (it shows the track name) — highlighting the
-                        // pill PREVIEWS what a click expands into: the playback controls.
-                        HStack(spacing: 16) {
+                        // Now Playing is already open (it shows the track + artwork) — highlighting
+                        // the pill PREVIEWS what a click expands into: just the playback controls,
+                        // clean, no CD, sized like the text pills.
+                        HStack(spacing: 22) {
                             Image(systemName: "backward.fill")
                             Image(systemName: m.spinning ? "pause.fill" : "play.fill")
                             Image(systemName: "forward.fill")
                         }
-                        .font(.footnote.weight(.semibold))
+                        .font(.callout.weight(.semibold))
                         .foregroundStyle(.primary)
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 26)
+                        .padding(.vertical, 15)
                     } else {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(m.item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
-                            if let sub = m.sub, !sub.isEmpty {
-                                Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        HStack(spacing: 12) {
+                            // The round CD itself, spinning — the iOS mini bar look.
+                            TVSpinningDisc(item: m.item, size: 38, spinning: m.spinning)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(m.item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
+                                if let sub = m.sub, !sub.isEmpty {
+                                    Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                }
                             }
+                            .frame(maxWidth: 240, alignment: .leading)
                         }
-                        .frame(maxWidth: 240, alignment: .leading)
+                        .padding(.leading, 8)
+                        .padding(.trailing, 18)
+                        .padding(.vertical, 7)
                     }
                 }
-                .padding(.leading, 8)
-                .padding(.trailing, 18)
-                .padding(.vertical, 7)
                 .background(
                     Capsule().fill(selected && !focused ? AnyShapeStyle(.white.opacity(0.16))
                                                         : AnyShapeStyle(.clear))
@@ -302,8 +306,7 @@ struct TVNavMiniPill: View {
                 }
                 .clipShape(Capsule())
                 .overlay(Capsule().strokeBorder(.white.opacity(focused ? 0.95 : 0), lineWidth: 2))
-                // "Expands on top" when the remote lands on it.
-                .scaleEffect(focused ? 1.08 : 1.0, anchor: .top)
+                .scaleEffect(focused ? 1.04 : 1.0)   // subtle lift; the ring is the focus cue
             } else {
                 // Nothing playing anywhere — a plain text tab like its siblings.
                 Text("Now Playing")
@@ -347,21 +350,16 @@ struct TVNavTransportPill: View {
     var body: some View {
         let direct = videoCtl.direct
         let item = direct ? videoCtl.activeVideo : player.currentItem
-        HStack(spacing: 16) {
-            if let item {
-                TVSpinningDisc(item: item, size: 44,
-                               spinning: direct ? !videoCtl.directPaused : player.isPlaying)
-                // NO track name here — Now Playing (behind the pill) already displays it. While
-                // scrubbing, the slot shows the live time readout instead.
-                if scrubbing {
-                    Text("\(player.currentTime.formattedDuration) · \(player.duration.formattedDuration)")
-                        .font(.caption)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                }
+        HStack(spacing: 14) {
+            // NO CD and NO track name here — Now Playing (behind the pill) already shows both.
+            // While scrubbing, a live time readout leads the row.
+            if scrubbing {
+                Text("\(player.currentTime.formattedDuration) · \(player.duration.formattedDuration)")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .padding(.leading, 8)
             }
-
-            Spacer(minLength: 16)
 
             controlButton(.prev, "backward.fill") {
                 if direct { videoCtl.skipDirect(-1, client: client, audio: player) }
@@ -379,15 +377,14 @@ struct TVNavTransportPill: View {
                 controlButton(.lyrics, TVNowPlayingUI.shared.pane == .lyrics ? "quote.bubble.fill" : "quote.bubble") {
                     TVNowPlayingUI.shared.toggle(.lyrics)
                 }
-                .padding(.leading, 10)
+                .padding(.leading, 14)
                 controlButton(.queue, "list.triangle") {
                     TVNowPlayingUI.shared.toggle(.queue)
                 }
             }
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 12)
-        .frame(width: 620)   // compact — no track-name block (Now Playing shows the track)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         // The artwork wash IS the progress bar: revealed left→right across the pill as the track
         // plays — brighter while scrubbing. No separate bar.
         .background(alignment: .leading) {
