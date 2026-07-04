@@ -26,20 +26,21 @@ struct TVNowPlayingView: View {
                 TVBackdrop(item: player.currentItem ?? SessionHub.shared.remote?.item)
             }
 
-            if inVideoMode {
-                // Video fills the screen; the mini-bar band (mounted at the app root) captions it at
-                // the bottom. Nothing else here.
+            if videoCtl.direct {
+                // Music Videos playlist: the video IS the content (its own audio). No audio carousel.
                 Color.clear
             } else if player.currentItem != nil {
-                // ----- The skeuomorphic centrepiece: cover + CD + reflection, playhead below. Lifted
-                // above the bottom mini-bar band so the track sits in the middle. -----
-                VStack(spacing: 8) {
-                    TVNowPlayingArtwork(coverSize: 400)
+                // The skeuomorphic cover-flow carousel: cover + CD + reflection with the prev/next
+                // tracks flanking it, and the playhead below. Centred in the middle for plain audio;
+                // when a music video is the backdrop it shrinks and DOCKS to the bottom like a dock.
+                let docked = inVideoMode
+                VStack(spacing: 10) {
+                    TVNowPlayingArtwork(coverSize: docked ? 150 : 400)
                     progressBar
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.bottom, 220)   // clear the mini-bar band
-                .transition(.opacity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: docked ? .bottom : .center)
+                .padding(.bottom, docked ? 44 : 0)
+                .animation(.spring(response: 0.5, dampingFraction: 0.86), value: docked)
             } else if let remote = SessionHub.shared.remote {
                 // Another device of this account is playing — mirror it and offer remote control.
                 remoteMirror(remote)
@@ -57,22 +58,15 @@ struct TVNowPlayingView: View {
         }
         // The tab bar stays visible here like every other page (play/pause is handled globally at the
         // root, so it works no matter where focus is).
-        // Video mode: the screen itself takes focus so trackpad swipes skip — between playlist videos
-        // (direct) or between queue tracks (matched).
-        .focusable(inVideoMode)
+        // Only the Music Videos PLAYLIST needs the screen to take focus (no carousel then) — for audio
+        // and matched-video the docked carousel owns focus and skips tracks itself.
+        .focusable(videoCtl.direct)
         .onMoveCommand { direction in
-            guard inVideoMode else { return }
-            let delta: Int
+            guard videoCtl.direct else { return }
             switch direction {
-            case .left: delta = -1
-            case .right: delta = +1
-            default: return
-            }
-            if videoCtl.direct {
-                videoCtl.skipDirect(delta, client: client, audio: player)
-            } else {
-                let next = player.queue.currentIndex + delta
-                if player.queue.items.indices.contains(next) { player.play(at: next) }
+            case .left:  videoCtl.skipDirect(-1, client: client, audio: player)
+            case .right: videoCtl.skipDirect(+1, client: client, audio: player)
+            default: break
             }
         }
         // NOTE: video mode is owned by the APP ROOT (MusicTVApp evaluates on track/play changes), not

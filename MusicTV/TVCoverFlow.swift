@@ -307,18 +307,28 @@ struct TVNowPlayingArtwork: View {
     }
 
     var body: some View {
-        Group {
-            if let item = player.currentItem {
-                TVFlowCover(item: item,
-                            size: coverSize,
-                            discOut: discOut && !nearEnd,
-                            spinning: player.isPlaying,
-                            showReflection: true,
-                            emphasized: true)
-                    // Unique per queue-slot (the same song can sit in the queue twice) so a track
-                    // change swaps the view and the transition below runs.
-                    .id("\(player.queue.currentIndex)-\(item.id)")
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        ZStack {
+            // Previous / next tracks peek out behind the centre — the cover-flow context.
+            if let prev = player.previousItem {
+                sideCover(prev).offset(x: -coverSize * 0.66)
+            }
+            if let next = player.upcomingItem {
+                sideCover(next).offset(x: coverSize * 0.66)
+            }
+            // Centre = the current track: reflective, CD out and spinning, choreographed on change.
+            Group {
+                if let item = player.currentItem {
+                    TVFlowCover(item: item,
+                                size: coverSize,
+                                discOut: discOut && !nearEnd,
+                                spinning: player.isPlaying,
+                                showReflection: true,
+                                emphasized: true)
+                        // Unique per queue-slot (the same song can sit in the queue twice) so a track
+                        // change swaps the view and the transition below runs.
+                        .id("\(player.queue.currentIndex)-\(item.id)")
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
             }
         }
         .animation(.easeInOut(duration: 0.32), value: player.queue.currentIndex)
@@ -349,6 +359,15 @@ struct TVNowPlayingArtwork: View {
             discOut = true
         }
         .animation(.easeOut(duration: 0.2), value: focused)
+    }
+
+    /// A dimmed, blurred neighbour cover flanking the centre — reflective (so it lines up with the
+    /// centre), but no CD, no spin, no label.
+    private func sideCover(_ item: MediaItem) -> some View {
+        TVFlowCover(item: item, size: coverSize * 0.6, showReflection: true, showLabel: false)
+            .opacity(0.4)
+            .blur(radius: 1.5)
+            .allowsHitTesting(false)
     }
 
     // MARK: Choreography

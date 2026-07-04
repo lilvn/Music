@@ -30,13 +30,14 @@ struct TVRootView: View {
                 .padding(.trailing, 60)
                 .padding(.top, 20)
         }
-        // The mini bar: a compact Liquid Glass shelf in the bottom-left of EVERY page — including Now
-        // Playing (the full page sits above it). Non-focusable visual chrome (the Now Playing tab is how
-        // you open the full page).
+        // The mini bar: a compact Liquid Glass shelf in the bottom-left of every BROWSE page. Hidden on
+        // the Now Playing tab, which has the full carousel instead. Non-focusable visual chrome.
         .overlay(alignment: .bottomLeading) {
             let videoCtl = TVVideoController.shared
             Group {
-                if videoCtl.direct, let video = videoCtl.activeVideo {
+                if tab == .nowPlaying {
+                    EmptyView()
+                } else if videoCtl.direct, let video = videoCtl.activeVideo {
                     TVNowPlayingBug(item: video, artistLine: video.primaryArtist, spinning: true)
                 } else if let item = player.currentItem {
                     TVNowPlayingBug(item: item,
