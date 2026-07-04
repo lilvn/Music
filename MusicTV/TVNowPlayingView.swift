@@ -40,6 +40,9 @@ struct TVNowPlayingView: View {
                 if videoCtl.direct {
                     // Music Videos playlist: the video IS the content (its own audio). No audio carousel.
                     Color.clear
+                } else if SessionHub.shared.yieldedToRemote, let remote = SessionHub.shared.remote {
+                    // Another device took over playback (exclusive-playback rule) — mirror it.
+                    remoteMirror(remote)
                 } else if player.currentItem != nil {
                     // The skeuomorphic cover-flow carousel: cover + CD + reflection. Centred for plain
                     // audio; when a music video is the backdrop OR a pane (lyrics/queue) is open it
@@ -274,6 +277,22 @@ struct TVNowPlayingView: View {
                         .font(.title3).foregroundStyle(.secondary)
                 }
 
+                // LIVE playhead — extrapolated between session polls, so it moves in real time.
+                TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
+                    let dur = max(remote.durationSeconds, 1)
+                    let pos = min(remote.livePosition(at: ctx.date), dur)
+                    VStack(spacing: 6) {
+                        ProgressView(value: pos / dur)
+                        HStack {
+                            Text(pos.formattedDuration)
+                            Spacer()
+                            Text(dur.formattedDuration)
+                        }
+                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 560)
+
                 HStack(spacing: 40) {
                     Button { SessionHub.shared.previousRemote() } label: {
                         Image(systemName: "backward.fill")
@@ -287,10 +306,12 @@ struct TVNowPlayingView: View {
                 }
                 .buttonStyle(.borderless)
 
-                Button { SessionHub.shared.transferHere() } label: {
-                    Label("Play on this TV", systemImage: "tv")
+                if remote.item.type != "MusicVideo" {   // a video can't transfer as local audio
+                    Button { SessionHub.shared.transferHere() } label: {
+                        Label("Play on this TV", systemImage: "tv")
+                    }
+                    .disabled(SessionHub.shared.transferring)
                 }
-                .disabled(SessionHub.shared.transferring)
             }
         }
         .padding(80)

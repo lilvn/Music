@@ -32,6 +32,10 @@ final class TVVideoController {
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var loaded = false
+    /// The direct video currently reported to Jellyfin's session (so phones see the TV's video
+    /// playback live); nil when nothing is reported.
+    @ObservationIgnored private var reportedVideoId: String?
+    @ObservationIgnored private var videoTick = 0
 
     private init() {}
 
@@ -132,10 +136,40 @@ final class TVVideoController {
 
     private func playDirectAt(_ i: Int) {
         guard directQueue.indices.contains(i), let url = client?.videoStreamURL(for: directQueue[i]) else { return }
+        reportStopIfNeeded()                                 // close out the previous video's session
         makePlayer(url: url, muted: false, loops: false)     // the video's own audio plays
         activeVideo = directQueue[i]
         directPaused = false
         avPlayer?.playImmediately(atRate: 1)
+        // Report to Jellyfin so other devices see the TV playing this video (live mini bar/mirror).
+        let id = directQueue[i].id
+        let ids = directQueue.map(\.id)
+        reportedVideoId = id
+        videoTick = 0
+        Task { await client?.reportPlaybackStart(itemId: id, positionTicks: 0, queueIds: ids) }
+    }
+
+    /// Close out the reported video session, at the current playhead if we still have one.
+    private func reportStopIfNeeded() {
+        guard let id = reportedVideoId else { return }
+        reportedVideoId = nil
+        let ticks = Int64((avPlayer?.currentTime().seconds ?? 0) * 10_000_000)
+        Task { await client?.reportPlaybackStopped(itemId: id, positionTicks: ticks) }
+    }
+
+    /// Route a transport command sent by another device (phone controlling the TV) at the direct
+    /// playlist — the audio Player isn't what's playing here.
+    func handleRemote(_ command: String) {
+        guard direct else { return }
+        switch command {
+        case "PlayPause":     togglePlayPause()
+        case "Pause":         if !directPaused { togglePlayPause() }
+        case "Unpause":       if directPaused { togglePlayPause() }
+        case "NextTrack":     if let client, let audio { skipDirect(+1, client: client, audio: audio) }
+        case "PreviousTrack": if let client, let audio { skipDirect(-1, client: client, audio: audio) }
+        case "Stop":          if let audio { exit(audio: audio, resumeAudio: false) }
+        default: break
+        }
     }
 
     // MARK: - Shared engine
@@ -170,6 +204,18 @@ final class TVVideoController {
         ) { [weak self, weak av] t in
             guard let self, let d = av?.currentItem?.duration.seconds, d.isFinite, d > 0 else { return }
             self.directProgress = min(max(t.seconds / d, 0), 1)
+            // Report direct-video progress every ~5s (matching the audio Player's cadence) so other
+            // devices' session polls see a moving playhead.
+            if self.direct, let id = self.reportedVideoId {
+                self.videoTick += 1
+                if self.videoTick % 10 == 0 {
+                    let ticks = Int64(t.seconds * 10_000_000)
+                    let ids = self.directQueue.map(\.id)
+                    let paused = self.directPaused
+                    Task { await self.client?.reportPlaybackProgress(itemId: id, positionTicks: ticks,
+                                                                     isPaused: paused, queueIds: ids) }
+                }
+            }
         }
         avPlayer = av
         // Belt-and-braces: if the pipeline stalled at the first frame, kick it once it has buffer.
@@ -185,6 +231,7 @@ final class TVVideoController {
     func exit(audio: Player, resumeAudio: Bool) {
         guard activeVideo != nil else { return }
         let wasDirect = direct
+        reportStopIfNeeded()   // close the video's session report before tearing the player down
         stopVideo()
         activeVideo = nil
         direct = false
@@ -198,7 +245,17 @@ final class TVVideoController {
     func togglePlayPause() {
         guard let avPlayer else { return }
         avPlayer.rate > 0 ? avPlayer.pause() : avPlayer.play()
-        if direct { directPaused = avPlayer.rate == 0 }
+        if direct {
+            directPaused = avPlayer.rate == 0
+            // Report the pause/resume immediately so other devices' mirrors flip without poll lag.
+            if let id = reportedVideoId {
+                let ticks = Int64(avPlayer.currentTime().seconds * 10_000_000)
+                let ids = directQueue.map(\.id)
+                let paused = directPaused
+                Task { await client?.reportPlaybackProgress(itemId: id, positionTicks: ticks,
+                                                            isPaused: paused, queueIds: ids) }
+            }
+        }
     }
 
     private func stopVideo() {

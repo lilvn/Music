@@ -533,6 +533,16 @@ struct SongRow: View {
             if let onAddToPlaylist {
                 Button { onAddToPlaylist() } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }
             }
+            // Cross-device queueing: when another device of this account is playing, any song can be
+            // queued onto IT from here (Spotify-Connect style).
+            if let remoteName = SessionHub.shared.remote?.deviceName {
+                Button { SessionHub.shared.enqueueRemote([song], next: true) } label: {
+                    Label("Play Next on \(remoteName)", systemImage: "tv")
+                }
+                Button { SessionHub.shared.enqueueRemote([song], next: false) } label: {
+                    Label("Play Last on \(remoteName)", systemImage: "tv")
+                }
+            }
             // Only where the row isn't already inside an album's tracklist (album detail uses numbers).
             if showAlbumArt, let albumRoute {
                 Button { push(albumRoute) } label: { Label("Go to Album", systemImage: "square.stack") }

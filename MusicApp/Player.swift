@@ -1019,6 +1019,9 @@ final class Player {
         let ticks = currentTicks
         let ids = reportedQueueIds
         Task { await client.reportPlaybackStart(itemId: id, positionTicks: ticks, queueIds: ids) }
+        // Exclusive playback: every real local start passes through here — this device now owns
+        // playback, so the hub pauses whichever other device was playing.
+        SessionHub.shared.noteLocalPlayStart()
     }
 
     private func reportProgress(paused: Bool) {

@@ -498,6 +498,21 @@ final class JellyfinClient {
         try? await sendMutation("Sessions/\(sessionId)/Playing/\(command)", method: "POST", query: query)
     }
 
+    /// Cast items AT another session: PlayNow replaces its queue (optionally at an index/position),
+    /// PlayNext/PlayLast enqueue without touching what's playing. Params are QUERY items per the
+    /// Jellyfin OpenAPI (`itemIds` comma-joined is required).
+    func sendPlay(sessionId: String, itemIds: [String], playCommand: String = "PlayNow",
+                  startIndex: Int? = nil, startTicks: Int64? = nil) async {
+        guard !itemIds.isEmpty else { return }
+        var query: [URLQueryItem] = [
+            q("playCommand", playCommand),
+            q("itemIds", itemIds.joined(separator: ",")),
+        ]
+        if let startIndex { query.append(q("startIndex", String(startIndex))) }
+        if let startTicks { query.append(q("startPositionTicks", String(startTicks))) }
+        try? await sendMutation("Sessions/\(sessionId)/Playing", method: "POST", query: query)
+    }
+
     /// Declare this session remote-controllable (required for other devices to send it commands).
     func postCapabilities() async {
         guard let base = baseURL else { return }

@@ -19,27 +19,71 @@ final class SessionHub {
     private(set) var remote: RemoteSession?
     /// True while `transferHere()` is pulling a session over.
     private(set) var transferring = false
+    /// This device auto-paused because another device took over playback (most-recent start wins).
+    /// The UI shows the remote mirror while this is set; playing locally again clears it.
+    private(set) var yieldedToRemote = false
 
     @ObservationIgnored private weak var client: JellyfinClient?
     @ObservationIgnored private weak var player: Player?
     @ObservationIgnored private var socketTask: URLSessionWebSocketTask?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var keepAliveTask: Task<Void, Never>?
+    /// When THIS device last started real playback — the takeover rule's tiebreaker clock.
+    @ObservationIgnored private var lastLocalPlayStart = Date.distantPast
+    /// Last poll's remote snapshot, for detecting a REMOTE play-start between polls.
+    @ObservationIgnored private var prevRemoteKey: (session: String, itemId: String, isPaused: Bool)?
 
     struct RemoteSession: Equatable {
         let id: String
+        let deviceId: String
         let deviceName: String
         let item: MediaItem
         let positionSeconds: Double
         let isPaused: Bool
         let queueIds: [String]
+        /// The remote queue with full metadata (server's NowPlayingQueueFullItems) — render-ready.
+        let queueItems: [MediaItem]
+        /// Extrapolation anchor: the position at `capturedAt`, already corrected for how stale the
+        /// server's snapshot was (positionTicks only advances when the target reports, ~5s cadence).
+        let basePosition: Double
+        let capturedAt: Date
+        let durationSeconds: Double
 
+        /// The live playhead: the anchored position, advancing in real time while not paused.
+        func livePosition(at now: Date) -> Double {
+            guard !isPaused else { return basePosition }
+            let raw = basePosition + now.timeIntervalSince(capturedAt)
+            return durationSeconds > 0 ? min(raw, durationSeconds) : raw
+        }
+
+        // Equality stays coarse (id/track/pause) — the playhead is driven by TimelineView, not by
+        // republishes, so onChange(of: remote) consumers don't churn every poll.
         static func == (l: Self, r: Self) -> Bool {
             l.id == r.id && l.item.id == r.item.id && l.isPaused == r.isPaused
         }
     }
 
     private init() {}
+
+    // MARK: - Server-clock parsing
+
+    private static let isoParser: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    /// Jellyfin stamps 7 fractional digits; ISO8601DateFormatter reliably parses 3 — trim first.
+    private static func parseServerDate(_ s: String?) -> Date? {
+        guard var s, !s.isEmpty else { return nil }
+        if let dot = s.firstIndex(of: ".") {
+            var end = s.index(after: dot)
+            while end < s.endIndex, s[end].isNumber { end = s.index(after: end) }
+            s = String(s[..<dot]) + "." + s[s.index(after: dot)..<end].prefix(3) + String(s[end...])
+        }
+        guard let d = isoParser.date(from: s), d.timeIntervalSince1970 > 0 else { return nil }
+        return d   // nil for the year-1 "never reported" sentinel
+    }
 
     // MARK: - Lifecycle
 
@@ -115,16 +159,81 @@ final class SessionHub {
             if ap != bp { return !ap }
             return (a.lastActivityDate ?? "") > (b.lastActivityDate ?? "")
         }.first
-        remote = best.flatMap { s in
+
+        // Server-now anchor WITHOUT trusting the local clock: our own session's LastActivityDate was
+        // just refreshed by this very fetch, so it ≈ the server's current time.
+        let serverNow = sessions.first { $0.deviceId == JellyfinClient.deviceId }
+            .flatMap { Self.parseServerDate($0.lastActivityDate) }
+
+        let previous = remote
+        let now = Date()
+        let newRemote = best.flatMap { s -> RemoteSession? in
             guard let item = s.nowPlayingItem else { return nil }
+            let reported = Double(s.playState?.positionTicks ?? 0) / 10_000_000
+            let paused = s.playState?.isPaused ?? false
+            let duration = item.durationSeconds ?? 0
+
+            // The server's PositionTicks only advances when the target reports (~5s cadence) — correct
+            // the snapshot's staleness by how long ago (in SERVER time) the target last checked in.
+            var base = reported
+            if !paused, let serverNow, let checkIn = Self.parseServerDate(s.lastPlaybackCheckIn) {
+                let stale = serverNow.timeIntervalSince(checkIn)
+                if stale > 0, stale < 60 { base += stale }
+            }
+            if duration > 0 { base = min(base, duration) }
+
+            // Anti-jitter: if we were already extrapolating this same track and the fresh anchor lands
+            // within 1.5s of where our extrapolation sits, keep the smooth value (a snap only happens
+            // on real seeks/skips).
+            if let previous, previous.id == s.id, previous.item.id == item.id, !paused, !previous.isPaused {
+                let running = previous.livePosition(at: now)
+                if abs(running - base) < 1.5 { base = running }
+            }
+
             return RemoteSession(
                 id: s.id,
+                deviceId: s.deviceId ?? "",
                 deviceName: s.deviceName ?? "another device",
                 item: item,
-                positionSeconds: Double(s.playState?.positionTicks ?? 0) / 10_000_000,
-                isPaused: s.playState?.isPaused ?? false,
-                queueIds: s.nowPlayingQueue?.map(\.id) ?? []
+                positionSeconds: reported,
+                isPaused: paused,
+                queueIds: s.nowPlayingQueue?.map(\.id) ?? [],
+                queueItems: s.fullQueueItems,
+                basePosition: base,
+                capturedAt: now,
+                durationSeconds: duration
             )
+        }
+        remote = newRemote
+
+        // ---- Exclusive playback (passive path — catches devices whose socket is dead) ----
+        // A REMOTE play-start while WE are playing: the older playback yields. The 10s grace window
+        // means the device that just started (it also proactively paused the other) never yields.
+        if let r = newRemote, !r.isPaused {
+            let remoteStarted = prevRemoteKey == nil
+                || prevRemoteKey!.session != r.id
+                || prevRemoteKey!.isPaused
+                || prevRemoteKey!.itemId != r.item.id
+            if remoteStarted, let player, player.isPlaying,
+               now.timeIntervalSince(lastLocalPlayStart) > 10 {
+                player.pause()
+                yieldedToRemote = true
+            }
+        }
+        prevRemoteKey = newRemote.map { ($0.id, $0.item.id, $0.isPaused) }
+        if newRemote == nil { yieldedToRemote = false }
+    }
+
+    // MARK: - Exclusive playback (active path)
+
+    /// Called from Player.reportStart() — the single choke point every real local start passes
+    /// through. Starting here means THIS device wins: tell the currently-playing other device to
+    /// pause (it flips to mirroring us).
+    func noteLocalPlayStart() {
+        lastLocalPlayStart = Date()
+        yieldedToRemote = false
+        if let client, let r = remote, !r.isPaused {
+            Task { await client.sendPlaystate(sessionId: r.id, command: "Pause") }
         }
     }
 
@@ -144,10 +253,44 @@ final class SessionHub {
         }
     }
 
+    /// Jump the REMOTE session to queue position `index` — resends its own queue with a start index
+    /// (the receiver's handlePlay honors StartIndex).
+    func playRemote(at index: Int) {
+        guard let client, let r = remote else { return }
+        let ids = r.queueIds.isEmpty ? r.queueItems.map(\.id) : r.queueIds
+        guard ids.indices.contains(index) else { return }
+        Task {
+            await client.sendPlay(sessionId: r.id, itemIds: ids, playCommand: "PlayNow", startIndex: index)
+            try? await Task.sleep(for: .milliseconds(600))
+            await refreshSessions()
+        }
+    }
+
+    /// Scrub the REMOTE session's playhead.
+    func seekRemote(to seconds: Double) {
+        guard let client, let r = remote else { return }
+        Task {
+            await client.sendPlaystate(sessionId: r.id, command: "Seek",
+                                       seekTicks: Int64(seconds * 10_000_000))
+            try? await Task.sleep(for: .milliseconds(600))
+            await refreshSessions()
+        }
+    }
+
+    /// Queue tracks onto the REMOTE session (Play Next / Play Last on another device).
+    func enqueueRemote(_ items: [MediaItem], next: Bool) {
+        guard let client, let r = remote, !items.isEmpty else { return }
+        Task {
+            await client.sendPlay(sessionId: r.id, itemIds: items.map(\.id),
+                                  playCommand: next ? "PlayNext" : "PlayLast")
+        }
+    }
+
     /// Pull the remote session's queue + position onto THIS device, then stop the remote — the
     /// "Transfer to this device" action.
     func transferHere() {
         guard let client, let player, let r = remote, !transferring else { return }
+        guard r.item.type != "MusicVideo" else { return }   // a video can't transfer as local audio
         transferring = true
         Task {
             let ids = r.queueIds.isEmpty ? [r.item.id] : r.queueIds
@@ -225,9 +368,27 @@ final class SessionHub {
 
     private func handlePlaystate(_ data: [String: Any]) {
         guard let player else { return }
-        switch data["Command"] as? String {
+        let command = data["Command"] as? String
+
+#if os(tvOS)
+        // The direct Music Videos playlist runs its own AVPlayer — route transport there.
+        if TVVideoController.shared.direct {
+            TVVideoController.shared.handleRemote(command ?? "")
+            return
+        }
+#endif
+        switch command {
         case "PlayPause":     player.togglePlayPause()
-        case "Pause":         player.pause()
+        case "Pause":
+            // Takeover race: if BOTH devices pressed play within seconds, both sent the other a
+            // Pause — without a tiebreak both would stop. Deterministic winner: within the 3s race
+            // window the LOWER deviceId keeps playing and ignores the pause.
+            if Date().timeIntervalSince(lastLocalPlayStart) < 3,
+               let rid = remote?.deviceId, JellyfinClient.deviceId < rid {
+                return
+            }
+            player.pause()
+            if remote != nil, !(remote?.isPaused ?? true) { yieldedToRemote = true }
         case "Unpause":       player.resume()
         case "NextTrack":     player.nextTrack()
         case "PreviousTrack": player.previousTrack()
@@ -243,9 +404,11 @@ final class SessionHub {
     }
 
     /// "Play these items here" — sent by another device (or Jellyfin Web) casting TO this one.
+    /// PlayNow replaces the queue; PlayNext/PlayLast ENQUEUE without touching what's playing.
     private func handlePlay(_ data: [String: Any]) {
         guard let client, let player,
               let ids = data["ItemIds"] as? [String], !ids.isEmpty else { return }
+        let command = data["PlayCommand"] as? String ?? "PlayNow"
         let startIndex = data["StartIndex"] as? Int ?? 0
         let ticks = (data["StartPositionTicks"] as? Int64)
             ?? (data["StartPositionTicks"] as? Int).map(Int64.init)
@@ -256,9 +419,14 @@ final class SessionHub {
             let byId = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
             let ordered = ids.compactMap { byId[$0] }
             let final = ordered.isEmpty ? items : ordered
-            player.play(items: final,
-                        from: min(max(0, startIndex), final.count - 1),
-                        startingAt: Double(ticks) / 10_000_000)
+            switch command {
+            case "PlayNext": player.playNext(final)
+            case "PlayLast": player.playLast(final)
+            default:
+                player.play(items: final,
+                            from: min(max(0, startIndex), final.count - 1),
+                            startingAt: Double(ticks) / 10_000_000)
+            }
         }
     }
 }

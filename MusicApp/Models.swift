@@ -88,14 +88,24 @@ struct SessionInfo: Codable, Identifiable {
     let nowPlayingItem: MediaItem?
     let playState: PlayState?
     let nowPlayingQueue: [QueueEntry]?
+    /// The queue as FULL items (complete metadata) — lets another device render this session's queue
+    /// with zero extra fetches. Lossy-decoded: one malformed item (arbitrary servers!) degrades to
+    /// nil instead of failing the entire /Sessions payload.
+    let nowPlayingQueueFullItems: [LossyMediaItem]?
+    var fullQueueItems: [MediaItem] { nowPlayingQueueFullItems?.compactMap(\.value) ?? [] }
     let supportsRemoteControl: Bool?
     let lastActivityDate: String?
+    /// Server-stamped time of this session's last progress report — the anchor for extrapolating a
+    /// live playhead between polls. Sentinel "0001-01-01…" when the session never reported.
+    let lastPlaybackCheckIn: String?
 
     enum CodingKeys: String, CodingKey {
         case id = "Id", userId = "UserId", deviceId = "DeviceId", deviceName = "DeviceName"
         case client = "Client", nowPlayingItem = "NowPlayingItem", playState = "PlayState"
         case nowPlayingQueue = "NowPlayingQueue", supportsRemoteControl = "SupportsRemoteControl"
         case lastActivityDate = "LastActivityDate"
+        case nowPlayingQueueFullItems = "NowPlayingQueueFullItems"
+        case lastPlaybackCheckIn = "LastPlaybackCheckIn"
     }
 
     struct PlayState: Codable {
@@ -110,6 +120,14 @@ struct SessionInfo: Codable, Identifiable {
         let id: String
         enum CodingKeys: String, CodingKey { case id = "Id" }
     }
+}
+
+/// Lenient element wrapper — decodes to nil on failure instead of throwing, so one bad element can't
+/// fail an entire array (used for NowPlayingQueueFullItems from arbitrary servers).
+struct LossyMediaItem: Codable {
+    let value: MediaItem?
+    init(from decoder: Decoder) { value = try? MediaItem(from: decoder) }
+    func encode(to encoder: Encoder) throws { try value?.encode(to: encoder) }
 }
 
 struct LyricResponse: Codable {
