@@ -314,10 +314,12 @@ struct TVNavMiniPill: View {
 
 // MARK: - The EXPANDED mini bar: the transport pill
 
-/// The mini bar grown into the full transport (click the compact pill to get here): CD + track text,
-/// previous / play-pause / next, lyrics + queue toggles, and a focusable scrub bar — all inside ONE
-/// glass pill at the top, exactly like the iOS mini bar owning playback. Menu (back) collapses it and
-/// returns focus to the nav bar.
+/// The mini bar grown into the transport (click the compact pill to get here): ONE row exactly like
+/// the iOS mini bar — CD + track text on the left, previous / play-pause / next / lyrics / queue on
+/// the right — with NO separate progress bar: the liquid-glass artwork fill across the pill IS the
+/// progress. Scrubbing = press DOWN from the controls onto the fill itself, then drag (swipe)
+/// left/right; the sub line becomes the live time readout while scrubbing. Menu (back) collapses the
+/// pill and hands the nav bar back.
 struct TVNavTransportPill: View {
     @Binding var engaged: Bool
 
@@ -327,54 +329,58 @@ struct TVNavTransportPill: View {
     @FocusState private var focus: Ctl?
 
     private var videoCtl: TVVideoController { TVVideoController.shared }
+    private var scrubbing: Bool { focus == .scrub }
 
     var body: some View {
         let direct = videoCtl.direct
         let item = direct ? videoCtl.activeVideo : player.currentItem
-        VStack(spacing: 12) {
-            HStack(spacing: 16) {
-                if let item {
-                    TVSpinningDisc(item: item, size: 44,
-                                   spinning: direct ? !videoCtl.directPaused : player.isPlaying)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
-                        Text(item.primaryArtist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    .frame(maxWidth: 230, alignment: .leading)
+        HStack(spacing: 16) {
+            if let item {
+                TVSpinningDisc(item: item, size: 44,
+                               spinning: direct ? !videoCtl.directPaused : player.isPlaying)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
+                    // While scrubbing the sub line is the live time readout.
+                    Text(scrubbing
+                         ? "\(player.currentTime.formattedDuration) · \(player.duration.formattedDuration)"
+                         : item.primaryArtist)
+                        .font(.caption2)
+                        .foregroundStyle(scrubbing ? .primary : .secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
                 }
-
-                Spacer(minLength: 16)
-
-                controlButton(.prev, "backward.fill") {
-                    if direct { videoCtl.skipDirect(-1, client: client, audio: player) }
-                    else { player.previousTrack() }
-                }
-                controlButton(.play, (direct ? !videoCtl.directPaused : player.isPlaying) ? "pause.fill" : "play.fill") {
-                    direct ? videoCtl.togglePlayPause() : player.togglePlayPause()
-                }
-                controlButton(.next, "forward.fill") {
-                    if direct { videoCtl.skipDirect(+1, client: client, audio: player) }
-                    else { player.nextTrack() }
-                }
-
-                if !direct {
-                    controlButton(.lyrics, TVNowPlayingUI.shared.pane == .lyrics ? "quote.bubble.fill" : "quote.bubble") {
-                        TVNowPlayingUI.shared.toggle(.lyrics)
-                    }
-                    .padding(.leading, 10)
-                    controlButton(.queue, "list.triangle") {
-                        TVNowPlayingUI.shared.toggle(.queue)
-                    }
-                }
+                .frame(maxWidth: 230, alignment: .leading)
             }
 
-            scrubBar(direct: direct)
+            Spacer(minLength: 16)
+
+            controlButton(.prev, "backward.fill") {
+                if direct { videoCtl.skipDirect(-1, client: client, audio: player) }
+                else { player.previousTrack() }
+            }
+            controlButton(.play, (direct ? !videoCtl.directPaused : player.isPlaying) ? "pause.fill" : "play.fill") {
+                direct ? videoCtl.togglePlayPause() : player.togglePlayPause()
+            }
+            controlButton(.next, "forward.fill") {
+                if direct { videoCtl.skipDirect(+1, client: client, audio: player) }
+                else { player.nextTrack() }
+            }
+
+            if !direct {
+                controlButton(.lyrics, TVNowPlayingUI.shared.pane == .lyrics ? "quote.bubble.fill" : "quote.bubble") {
+                    TVNowPlayingUI.shared.toggle(.lyrics)
+                }
+                .padding(.leading, 10)
+                controlButton(.queue, "list.triangle") {
+                    TVNowPlayingUI.shared.toggle(.queue)
+                }
+            }
         }
         .padding(.horizontal, 22)
-        .padding(.vertical, 14)
-        .frame(width: 980)
-        // The artwork wash IS the progress: revealed left→right across the whole transport as the
-        // track plays, same language as the compact pill and the iOS bar.
+        .padding(.vertical, 12)
+        .frame(width: 880)
+        // The artwork wash IS the progress bar: revealed left→right across the pill as the track
+        // plays — brighter while scrubbing. No separate bar.
         .background(alignment: .leading) {
             if let item {
                 GeometryReader { g in
@@ -382,7 +388,7 @@ struct TVNavTransportPill: View {
                         ? videoCtl.directProgress
                         : (player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0)
                     TVArtworkFill(item: item)
-                        .opacity(0.7)
+                        .opacity(scrubbing ? 1.0 : 0.7)
                         .mask(alignment: .leading) {
                             Rectangle().frame(width: max(0, g.size.width * frac))
                         }
@@ -390,8 +396,27 @@ struct TVNavTransportPill: View {
                 .allowsHitTesting(false)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
-        .glassEffect(.regular, in: .rect(cornerRadius: 34))
+        .clipShape(Capsule())
+        .glassEffect(.regular, in: .capsule)
+        // The invisible scrub stop: press DOWN from the controls to grab the fill itself, then drag
+        // left/right to scrub (each pan tick seeks ±5s); UP or a click hands focus back to play.
+        .background {
+            Color.clear
+                .contentShape(Rectangle())
+                .focusable(!direct)
+                .focused($focus, equals: .scrub)
+                .onMoveCommand { dir in
+                    switch dir {
+                    case .left:  player.seek(to: max(0, player.currentTime - 5))
+                    case .right: player.seek(to: min(player.duration, player.currentTime + 5))
+                    case .up, .down: focus = .play   // onMoveCommand consumes ALL moves — route out
+                    @unknown default: break
+                    }
+                }
+                .onTapGesture { focus = .play }
+        }
+        .scaleEffect(scrubbing ? 1.03 : 1.0)
+        .animation(.easeOut(duration: 0.15), value: scrubbing)
         .focusSection()
         // Menu/back collapses the transport and hands the nav bar back.
         .onExitCommand { engaged = false }
@@ -417,45 +442,6 @@ struct TVNavTransportPill: View {
         .buttonStyle(.tvBare)
         .focused($focus, equals: id)
         .animation(.easeOut(duration: 0.12), value: focus)
-    }
-
-    /// The progress bar — FOCUSABLE for audio: land on it and swipe left/right to scrub (±10s a step,
-    /// the tvOS equivalent of the iPhone's hold-and-drag). Direct video shows progress read-only.
-    @ViewBuilder
-    private func scrubBar(direct: Bool) -> some View {
-        let scrubFocused = focus == .scrub
-        HStack(spacing: 14) {
-            Text((direct ? 0 : player.currentTime).formattedDuration)
-                .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
-
-            GeometryReader { g in
-                let frac: Double = direct
-                    ? videoCtl.directProgress
-                    : (player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0)
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.22))
-                    Capsule().fill(.white.opacity(scrubFocused ? 1.0 : 0.75))
-                        .frame(width: max(6, g.size.width * frac))
-                }
-            }
-            .frame(height: scrubFocused ? 10 : 5)
-            .animation(.easeOut(duration: 0.15), value: scrubFocused)
-
-            Text((direct ? 0 : player.duration).formattedDuration)
-                .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
-        }
-        .contentShape(Rectangle())
-        .focusable(!direct)
-        .focused($focus, equals: .scrub)
-        .onMoveCommand { dir in
-            guard focus == .scrub else { return }
-            switch dir {
-            case .left:  player.seek(to: max(0, player.currentTime - 10))
-            case .right: player.seek(to: min(player.duration, player.currentTime + 10))
-            case .up:    focus = .play   // onMoveCommand consumes ALL moves — route up out manually
-            default: break
-            }
-        }
     }
 }
 
