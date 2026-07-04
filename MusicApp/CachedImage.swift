@@ -1,5 +1,13 @@
 import SwiftUI
 import ImageIO
+#if canImport(UIKit)
+import UIKit
+/// One decoded-bitmap type across platforms (UIImage on iOS/tvOS, NSImage on the Mac).
+typealias PlatformImage = UIImage
+#elseif canImport(AppKit)
+import AppKit
+typealias PlatformImage = NSImage
+#endif
 
 /// Decoded-image cache + background downsampler. `AsyncImage` re-decodes full-size images on the
 /// main thread each time a cell appears (janky scrolling, high memory). This decodes ONCE on a
@@ -8,7 +16,7 @@ import ImageIO
 final class ImageStore {
     static let shared = ImageStore()
 
-    private let cache = NSCache<NSString, UIImage>()
+    private let cache = NSCache<NSString, PlatformImage>()
     private let loader = Loader()
 
     private init() {
@@ -22,7 +30,7 @@ final class ImageStore {
         "\(url.absoluteString)#\(Int(maxPixel))" as NSString
     }
 
-    func cached(_ url: URL, maxPixel: CGFloat) -> UIImage? { cache.object(forKey: key(url, maxPixel)) }
+    func cached(_ url: URL, maxPixel: CGFloat) -> PlatformImage? { cache.object(forKey: key(url, maxPixel)) }
 
     /// Warm the cache for a batch of artwork up front, so shelves/grids show their art immediately
     /// instead of popping in as cells scroll into view. Work is off-main, downsampled, and `.utility`
@@ -38,14 +46,18 @@ final class ImageStore {
     /// Concurrent requests for the SAME art coalesce into one download+decode, and the loader caps how
     /// many distinct loads run at once so a fast scroll (or a prefetch batch) can't saturate the CPU /
     /// network and stall playback.
-    func load(_ url: URL, maxPixel: CGFloat) async -> UIImage? {
+    func load(_ url: URL, maxPixel: CGFloat) async -> PlatformImage? {
         let k = key(url, maxPixel)
         if let img = cache.object(forKey: k) { return img }
         return await loader.coalesced(k as String) { [cache] in
             guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
             let img = await Task.detached(priority: .utility) { Self.downsample(data, maxPixel: maxPixel) }.value
             if let img {
+#if canImport(UIKit)
                 let cost = img.cgImage.map { $0.bytesPerRow * $0.height } ?? data.count
+#else
+                let cost = Int(img.size.width * img.size.height * 4)   // decoded RGBA estimate
+#endif
                 cache.setObject(img, forKey: k, cost: cost)
             }
             return img
@@ -55,14 +67,14 @@ final class ImageStore {
     /// De-duplicates in-flight loads (same key → one task, all callers await it) and gates how many
     /// run concurrently with a small async semaphore.
     private actor Loader {
-        private var inFlight: [String: Task<UIImage?, Never>] = [:]
+        private var inFlight: [String: Task<PlatformImage?, Never>] = [:]
         private var active = 0
         private var waiters: [CheckedContinuation<Void, Never>] = []
         private let maxConcurrent = 6
 
-        func coalesced(_ key: String, _ build: @escaping () async -> UIImage?) async -> UIImage? {
+        func coalesced(_ key: String, _ build: @escaping () async -> PlatformImage?) async -> PlatformImage? {
             if let existing = inFlight[key] { return await existing.value }
-            let task = Task { [weak self] () -> UIImage? in
+            let task = Task { [weak self] () -> PlatformImage? in
                 await self?.acquire()
                 let result = await build()
                 await self?.release()
@@ -87,7 +99,7 @@ final class ImageStore {
 
     /// Decode + downsample to `maxPixel` using ImageIO (no intermediate full-size bitmap). Pure work,
     /// `nonisolated` so it runs on the detached decode task off the main actor.
-    private static nonisolated func downsample(_ data: Data, maxPixel: CGFloat) -> UIImage? {
+    private static nonisolated func downsample(_ data: Data, maxPixel: CGFloat) -> PlatformImage? {
         guard let src = CGImageSourceCreateWithData(data as CFData,
                                                     [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
         let opts: [CFString: Any] = [
@@ -97,7 +109,11 @@ final class ImageStore {
             kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixel),
         ]
         guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
-        return UIImage(cgImage: cg)
+#if canImport(UIKit)
+        return PlatformImage(cgImage: cg)
+#else
+        return PlatformImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+#endif
     }
 }
 
@@ -110,7 +126,7 @@ struct LibraryImage<Placeholder: View>: View {
     private let contentMode: ContentMode
     private let placeholder: Placeholder
 
-    @State private var image: UIImage?
+    @State private var image: PlatformImage?
 
     init(url: URL?, maxPixel: CGFloat, contentMode: ContentMode = .fill,
          @ViewBuilder placeholder: () -> Placeholder) {
@@ -125,7 +141,11 @@ struct LibraryImage<Placeholder: View>: View {
     var body: some View {
         Group {
             if let image {
+#if canImport(UIKit)
                 Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
+#else
+                Image(nsImage: image).resizable().aspectRatio(contentMode: contentMode)
+#endif
             } else {
                 placeholder
             }

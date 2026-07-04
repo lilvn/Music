@@ -69,6 +69,19 @@
 			);
 			target = B40AB70C2FF816AD00591F25 /* MusicTV */;
 		};
+		B474633F2FE19CE6004C4EC4 /* Exceptions for "MusicApp" folder in "MusicMac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AudioLevel.swift,
+				AudioStore.swift,
+				CachedImage.swift,
+				JellyfinClient.swift,
+				Models.swift,
+				Player.swift,
+				SessionHub.swift,
+			);
+			target = B40AB90E2FF8DE3400591F25 /* MusicMac */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -77,6 +90,7 @@
 			exceptions = (
 				B474633D2FE19CE6004C4EC2 /* Exceptions for "MusicApp" folder in "MusicApp" target */,
 				B474633E2FE19CE6004C4EC3 /* Exceptions for "MusicApp" folder in "MusicTV" target */,
+				B474633F2FE19CE6004C4EC4 /* Exceptions for "MusicApp" folder in "MusicMac" target */,
 			);
 			path = MusicApp;
 			sourceTree = "<group>";
@@ -873,6 +887,7 @@
 				DEVELOPMENT_TEAM = CVY4D7SJKP;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -907,6 +922,7 @@
 				DEVELOPMENT_TEAM = CVY4D7SJKP;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;

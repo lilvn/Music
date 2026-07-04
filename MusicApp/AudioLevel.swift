@@ -18,7 +18,11 @@ final class AudioLevelMonitor {
     var onLevel: ((Double) -> Void)?
 
     private let box = RawLevelBox()
+#if os(macOS)
+    private var timer: Timer?          // no CADisplayLink(target:selector:) on the Mac — 30 Hz timer
+#else
     private var displayLink: CADisplayLink?
+#endif
     private var smoothed: Float = 0
 
     /// Attach a metering tap to a freshly-created player item (call before it plays).
@@ -36,16 +40,30 @@ final class AudioLevelMonitor {
     }
 
     func start() {
+#if os(macOS)
+        guard timer == nil else { return }
+        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tick() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+#else
         guard displayLink == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(tick))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 30)
         link.add(to: .main, forMode: .common)
         displayLink = link
+#endif
     }
 
     func stop() {
+#if os(macOS)
+        timer?.invalidate()
+        timer = nil
+#else
         displayLink?.invalidate()
         displayLink = nil
+#endif
         smoothed = 0
         box.value = 0
         onLevel?(0)
