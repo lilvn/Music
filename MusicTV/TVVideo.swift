@@ -6,9 +6,8 @@ import AVKit
 /// the video fills the screen, and the skeuomorphic carousel docks to the bottom. When the video ends
 /// (or the user selects a track without one), the queue advances and audio playback resumes.
 ///
-/// Matching: this library organises music videos per-ARTIST (each video's Name is the artist), so a
-/// song matches when the video's name equals/contains its artist — with the song title checked too
-/// for libraries that name videos per-song.
+/// Matching is STANDARD and per-song: a music video is tied to the track whose TITLE it shares (see
+/// `videoMatching`), so any server that names its music videos after their songs works unchanged.
 @MainActor
 @Observable
 final class TVVideoController {
@@ -40,19 +39,19 @@ final class TVVideoController {
         loaded = true
     }
 
-    /// The library video for this song, if any. EXACT matches only (video name == the song's artist
-    /// or title, or properly-tagged video artist) — the old "contains" rules false-matched wide
-    /// (a video named "Che" hit every artist containing those letters) and launched random videos.
+    /// The library video for this SONG, if any. STANDARD per-song matching: a music video matches when
+    /// its title equals the song's title — the normal convention where a video is named after its song,
+    /// so it's tied to that track (not to the whole artist). When the video carries artist tags we also
+    /// require the artist to match, so two different songs sharing a title don't cross-match.
     func videoMatching(_ song: MediaItem?) -> MediaItem? {
         guard let song else { return nil }
-        let artist = song.primaryArtist.trimmingCharacters(in: .whitespaces).lowercased()
         let title = song.name.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !title.isEmpty else { return nil }
+        let artist = song.primaryArtist.trimmingCharacters(in: .whitespaces).lowercased()
         return videos.first { video in
-            let name = video.name.trimmingCharacters(in: .whitespaces).lowercased()
-            guard !name.isEmpty else { return false }
-            if !artist.isEmpty, name == artist { return true }
-            if name == title { return true }
-            return video.artistItems?.contains { $0.name.trimmingCharacters(in: .whitespaces).lowercased() == artist } ?? false
+            guard video.name.trimmingCharacters(in: .whitespaces).lowercased() == title else { return false }
+            guard let tags = video.artistItems, !tags.isEmpty else { return true }
+            return tags.contains { $0.name.trimmingCharacters(in: .whitespaces).lowercased() == artist }
         }
     }
 
@@ -82,12 +81,7 @@ final class TVVideoController {
     }
 
     private func showBackdrop(_ video: MediaItem, client: JellyfinClient, playing: Bool) {
-        if activeVideo?.id == video.id {
-            // The videos are named per-ARTIST, so every track on an artist's album matches the SAME
-            // video. showBackdrop is only re-entered here on a real track change, so restart the clip
-            // from the top — otherwise it drones on from the middle of the previous song ("the video
-            // keeps playing even when the song is over").
-            avPlayer?.seek(to: .zero)
+        if activeVideo?.id == video.id {                     // same video → just sync play state
             playing ? avPlayer?.play() : avPlayer?.pause()
             return
         }
