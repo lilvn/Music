@@ -91,8 +91,12 @@ struct TVCollectionDetailView: View {
                         openNowPlaying()
                     } label: { Label("Shuffle", systemImage: "shuffle") }
                 }
+                .buttonStyle(.glass)   // Liquid Glass, not the default white lozenge
                 .disabled(tracks.isEmpty)
             }
+            // A focus SECTION: pressing LEFT from any track row — even far above/below the buttons —
+            // deflects into this pane and lands on Play/Shuffle.
+            .focusSection()
 
             // Right pane: the tracks.
             ScrollView {
@@ -115,7 +119,10 @@ struct TVCollectionDetailView: View {
                     }
                 }
                 .padding(.vertical, 20)
+                .padding(.horizontal, 24)   // lateral room for the focus lift inside the scroll region
             }
+            .scrollClipDisabled()   // don't shear the focused row's lift at the ScrollView edges
+            .focusSection()         // RIGHT from Play/Shuffle always lands in the list, even when short
         }
         .padding(.horizontal, 80)
         .padding(.top, 40)
@@ -196,6 +203,7 @@ struct TVArtistDetailView: View {
                         Button { playAll(shuffled: false) } label: { Label("Play", systemImage: "play.fill") }
                         Button { playAll(shuffled: true) } label: { Label("Shuffle", systemImage: "shuffle") }
                     }
+                    .buttonStyle(.glass)
                 }
                 .padding(.top, 20)
 
@@ -211,6 +219,7 @@ struct TVArtistDetailView: View {
             }
             .padding(.horizontal, 60)
         }
+        .scrollClipDisabled()   // focused cover cards lift past the scroll bounds without shearing
         .background { TVBackdrop(item: artist) }
         .navigationDestination(item: $route) { tvDestination(for: $0) }
         .task {

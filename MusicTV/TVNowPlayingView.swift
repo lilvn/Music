@@ -20,6 +20,11 @@ struct TVNowPlayingView: View {
     @State private var footerVisible = true
     @State private var footerIdle: Task<Void, Never>?
 
+    // The transport buttons in the footer block. While one is focused the footer must NOT auto-hide —
+    // removing a focused view makes the tvOS focus engine jump unpredictably (usually to the tab bar).
+    private enum ControlButton: Hashable { case previous, playPause, next }
+    @FocusState private var controlFocus: ControlButton?
+
     var body: some View {
         // VStack, NOT a ZStack: the fixed footer is the bottom row and the moving carousel fills the row
         // above it, so the footer is always on-screen. (A bottom-aligned child of a ZStack whose backdrop
@@ -36,7 +41,8 @@ struct TVNowPlayingView: View {
                     // shrinks and DOCKS toward the footer. Only the DOCK moves — the footer stays put.
                     let docked = inVideoMode
                     TVNowPlayingArtwork(coverSize: docked ? 150 : 400, docked: docked,
-                                        onInteract: bumpFooter)
+                                        onInteract: bumpFooter,
+                                        onFocusControls: focusControls)
                         .frame(maxWidth: .infinity, maxHeight: .infinity,
                                alignment: docked ? .bottomLeading : .center)
                         .padding(.leading, docked ? 80 : 0)
@@ -59,20 +65,24 @@ struct TVNowPlayingView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // The playhead footer — pinned to the bottom. On idle it slides DOWN and out of the layout
-            // (not just fades) so the content above — the bottom-left docked artwork — drops into its
-            // place. Returns on interaction.
+            // The transport block — playback controls + playhead footer, pinned to the bottom. On idle
+            // it slides DOWN and out of the layout (not just fades) so the content above — the
+            // bottom-left docked artwork — drops into its place. Returns on interaction.
             if (player.currentItem != nil || videoCtl.direct), footerVisible {
-                progressFooter
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                VStack(spacing: 20) {
+                    controlsRow
+                    progressFooter
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.4), value: footerVisible)
         .onAppear(perform: bumpFooter)
         .onDisappear { footerIdle?.cancel() }
-        // Track change and play/pause both bring the bar back.
+        // Track change and play/pause both bring the bar back; keep it while a button holds focus.
         .onChange(of: player.currentItem?.id) { _, _ in bumpFooter() }
         .onChange(of: player.isPlaying) { _, _ in bumpFooter() }
+        .onChange(of: controlFocus) { _, _ in bumpFooter() }
         .background {
             if inVideoMode, let av = videoCtl.avPlayer {
                 TVVideoLayer(player: av).ignoresSafeArea().transition(.opacity)
@@ -100,17 +110,63 @@ struct TVNowPlayingView: View {
     }
 
     /// Show the footer and restart the idle countdown. Called on appear and on every remote input,
-    /// track change, and play/pause.
+    /// track change, and play/pause. Never hides while a transport button is focused — pulling a
+    /// focused view out of the hierarchy sends tvOS focus somewhere arbitrary.
     private func bumpFooter() {
         footerVisible = true
         footerIdle?.cancel()
         footerIdle = Task {
             try? await Task.sleep(for: .seconds(4))
-            if !Task.isCancelled { footerVisible = false }
+            if !Task.isCancelled, controlFocus == nil { footerVisible = false }
         }
     }
 
+    /// Swiping DOWN from the carousel lands on the transport: make sure the block is on screen first,
+    /// then hand focus to the play/pause button on the next runloop (after it exists).
+    private func focusControls() {
+        bumpFooter()
+        Task { @MainActor in controlFocus = .playPause }
+    }
+
     // MARK: - Chrome (minimal liquid glass)
+
+    /// Previous / play-pause / next as Liquid Glass buttons. Direct (Music Videos playlist) drives the
+    /// video controller; everything else the audio Player. Every press restarts the idle countdown.
+    private var controlsRow: some View {
+        let direct = videoCtl.direct
+        return HStack(spacing: 40) {
+            Button {
+                bumpFooter()
+                if direct { videoCtl.skipDirect(-1, client: client, audio: player) }
+                else { player.previousTrack() }   // restart-if->5s, the standard transport semantic
+            } label: {
+                Image(systemName: "backward.fill").font(.title3)
+            }
+            .focused($controlFocus, equals: .previous)
+
+            Button {
+                bumpFooter()
+                direct ? videoCtl.togglePlayPause() : player.togglePlayPause()
+            } label: {
+                Image(systemName: (direct ? !videoCtl.directPaused : player.isPlaying) ? "pause.fill" : "play.fill")
+                    .font(.title2)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .focused($controlFocus, equals: .playPause)
+
+            Button {
+                bumpFooter()
+                if direct { videoCtl.skipDirect(+1, client: client, audio: player) }
+                else { player.nextTrack() }
+            } label: {
+                Image(systemName: "forward.fill").font(.title3)
+            }
+            .focused($controlFocus, equals: .next)
+            .disabled(!direct && !player.canGoNext)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+    }
 
     /// The playhead as a fixed full-width footer pinned to the bottom of the screen — the default tvOS
     /// progress bar, spanning the width like a footer. Stays put while the carousel/dock moves above it.

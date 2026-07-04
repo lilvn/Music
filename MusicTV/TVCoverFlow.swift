@@ -190,12 +190,12 @@ struct TVFlowCover: View {
     }
 }
 
-// MARK: - Corner "channel bug" (the TV's mini bar)
+// MARK: - The TV's mini bar (top-center, below the tab bar)
 
-/// The TV's mini bar: a full-width band pinned to the bottom of every page. A black gradient fills the
-/// whole bottom and fades UP to transparent around the track title, so whatever's behind (a grid, or a
-/// playing music video) is covered at the bottom and clean above. On the left, the skeuomorphic
-/// reflective cover + slid-out spinning CD; to its right, the track title / artist / album.
+/// The TV's mini bar, styled like the iPhone MiniPlayer: a Liquid Glass capsule sized by its caller
+/// (TVRootView gives it ~the tab bar's width, centered right below it). Spinning CD + two-line
+/// title/artist on the left, play-state glyph on the right, and the artwork-wash progress fill
+/// revealing left→right as the track plays. Pure chrome — no Buttons, never focusable.
 struct TVNowPlayingBug: View {
     let item: MediaItem
     var artistLine: String? = nil
@@ -203,7 +203,7 @@ struct TVNowPlayingBug: View {
     var spinning = true
 
     @Environment(Player.self) private var player
-    private let cover: CGFloat = 44
+    private let cover: CGFloat = 52
     @State private var width: CGFloat = 1
 
     /// 0…1 playhead for the current track — the audio Player (normal + matched-video) or the direct
@@ -214,22 +214,40 @@ struct TVNowPlayingBug: View {
         return player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0
     }
 
+    /// One secondary line: the artist, or the album/"Playing on X" line when that's all we have.
+    private var subLine: String? {
+        if let artistLine, !artistLine.isEmpty { return artistLine }
+        if let albumLine, !albumLine.isEmpty { return albumLine }
+        return nil
+    }
+
     var body: some View {
-        // A small Liquid Glass PILL: spinning CD + track title, with the artwork-wash fill revealing
-        // left→right as the track plays. Sits top-right, beside the nav bar.
-        HStack(spacing: 12) {
-            // The pill carries its own text, so hide the cover's built-in label.
+        HStack(spacing: 14) {
+            // The bar carries its own text, so hide the cover's built-in label.
             TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
                         showReflection: false, showLabel: false)
                 .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
 
-            Text(item.name)
-                .font(.caption).fontWeight(.semibold)
-                .lineLimit(1)
-                .frame(maxWidth: 200, alignment: .leading)
-                .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                    .font(.callout).fontWeight(.semibold)
+                    .lineLimit(1)
+                if let subLine {
+                    Text(subLine).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            // Play-state glyph (non-interactive — `spinning` also covers remote/video branches).
+            Image(systemName: spinning ? "pause.fill" : "play.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.primary.opacity(0.85))
+                .contentTransition(.symbolEffect(.replace))
+                .padding(.trailing, 6)
         }
-        .padding(.leading, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)   // fill the caller's width, like the iOS bar
+        .padding(.leading, 10)
         .padding(.trailing, 24)
         .padding(.vertical, 8)
         // Progress FILL, like the iPhone mini bar: the artwork blurred into a wash, revealed left→right.
@@ -287,6 +305,9 @@ struct TVNowPlayingArtwork: View {
     var docked = false
     /// Called on any remote input here so the parent can keep the playhead footer awake.
     var onInteract: () -> Void = {}
+    /// Swiping DOWN hands focus to the transport controls below (Now Playing supplies this); nil →
+    /// down releases focus like up does.
+    var onFocusControls: (() -> Void)? = nil
     @FocusState private var focused: Bool
 
     // ---- Track-change choreography -------------------------------------------------------------
@@ -329,8 +350,13 @@ struct TVNowPlayingArtwork: View {
             switch direction {
             case .left:  step(-1)
             case .right: step(+1)
-            case .up, .down:
+            case .up:
                 focused = false   // hand focus back to the rest of the screen (tab bar)
+            case .down:
+                // Down = the transport controls (deterministic — the bare geometric re-resolve after
+                // releasing focus could land on the tab bar instead).
+                if let onFocusControls { focused = false; onFocusControls() }
+                else { focused = false }
             default:
                 break
             }

@@ -10,6 +10,21 @@ enum TVDS {
     static let thumb: CGFloat = 6      // row thumbnails
 }
 
+/// tvOS renders a white platter/highlight over the label of ANY built-in button style on focus —
+/// .plain draws it too. A custom ButtonStyle is the only full opt-out: the label renders bare, the
+/// button stays focusable/clickable, and focus feedback is ours alone (the .focused-driven
+/// magnification the cards already apply). Keeps a tiny press dip so remote clicks feel physical.
+struct TVBareButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+extension ButtonStyle where Self == TVBareButtonStyle {
+    static var tvBare: TVBareButtonStyle { .init() }
+}
+
 /// Where a browse card leads. Local to the TV app — the phone's LibraryRoute carries iPhone-only cases.
 enum TVCollection: Hashable {
     case album(MediaItem)
@@ -72,7 +87,7 @@ struct TVCoverCard: View {
             // coverless album isn't a square tile among rounded ones.
             .clipShape(RoundedRectangle(cornerRadius: TVDS.cover, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.tvBare)   // no system white platter — the magnification below is the focus cue
         .focused($focused)
         .scaleEffect(focused ? 1.08 : 1.0)   // render transform (no layout measurement — launch-crash safe)
         .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 22 : 0, y: focused ? 14 : 0)
@@ -141,9 +156,12 @@ struct TVSongRow: View {
                         .font(.subheadline).monospacedDigit().foregroundStyle(.tertiary)
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
         }
-        .buttonStyle(.plain)
+        // Liquid Glass row platter with the native focus lift — replaces .plain's white lozenge.
+        .buttonStyle(.glass)
+        .buttonBorderShape(.roundedRectangle(radius: TVDS.artwork))
     }
 }
 
@@ -188,7 +206,7 @@ struct TVArtistCell: View {
                 .aspectRatio(1, contentMode: .fill)
                 .clipShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.tvBare)   // no system white platter — the magnification below is the focus cue
             .focused($focused)
             .scaleEffect(focused ? 1.08 : 1.0)   // lift the whole avatar, not the photo inside it
             .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 20 : 0, y: focused ? 12 : 0)

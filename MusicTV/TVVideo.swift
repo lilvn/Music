@@ -24,6 +24,8 @@ final class TVVideoController {
     private(set) var direct = false
     /// Playhead fraction (0…1) for the mini bar while in direct video mode.
     private(set) var directProgress: Double = 0
+    /// Whether the direct video is paused — observable so transport UI can show the right glyph.
+    private(set) var directPaused = false
 
     @ObservationIgnored private var directQueue: [MediaItem] = []
     @ObservationIgnored private var directIndex = 0
@@ -132,6 +134,7 @@ final class TVVideoController {
         guard directQueue.indices.contains(i), let url = client?.videoStreamURL(for: directQueue[i]) else { return }
         makePlayer(url: url, muted: false, loops: false)     // the video's own audio plays
         activeVideo = directQueue[i]
+        directPaused = false
         avPlayer?.playImmediately(atRate: 1)
     }
 
@@ -185,6 +188,7 @@ final class TVVideoController {
         stopVideo()
         activeVideo = nil
         direct = false
+        directPaused = false
         directQueue = []
         if wasDirect, resumeAudio { audio.resume() }
     }
@@ -194,6 +198,7 @@ final class TVVideoController {
     func togglePlayPause() {
         guard let avPlayer else { return }
         avPlayer.rate > 0 ? avPlayer.pause() : avPlayer.play()
+        if direct { directPaused = avPlayer.rate == 0 }
     }
 
     private func stopVideo() {

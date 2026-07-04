@@ -30,9 +30,10 @@ struct TVRootView: View {
                 .padding(.trailing, 60)
                 .padding(.top, 20)
         }
-        // The mini bar: a small Liquid Glass PILL pinned to the bottom-left. Hidden on the Now Playing
-        // tab, which has the full carousel instead. Non-focusable chrome.
-        .overlay(alignment: .bottomLeading) {
+        // The mini bar: an iOS-MiniPlayer-style Liquid Glass bar top-CENTER, directly below the tvOS
+        // tab bar and roughly its width. Hidden on the Now Playing tab, which has the full carousel
+        // instead. Non-focusable chrome — no Buttons, so it never steals focus from the tab bar above.
+        .overlay(alignment: .top) {
             let videoCtl = TVVideoController.shared
             Group {
                 if tab == .nowPlaying {
@@ -51,8 +52,10 @@ struct TVRootView: View {
                                     spinning: !remote.isPaused)
                 }
             }
-            .padding(.leading, 60)
-            .padding(.bottom, 48)
+            // ~57% of the screen matches the 5-item tab bar's span; 126pt clears the bar (~y40-110).
+            .containerRelativeFrame(.horizontal) { length, _ in length * 0.57 }
+            .padding(.top, 126)
+            .allowsHitTesting(false)
         }
     }
 }
@@ -194,51 +197,17 @@ struct TVPlaylistsView: View {
             ScrollView {
                 LazyVGrid(columns: cols, spacing: 48) {
                     // Liked Songs first, like the phone.
-                    VStack(alignment: .leading, spacing: 12) {
-                        Button { route = .liked } label: {
-                            ZStack {
-                                LinearGradient(colors: [Color(red: 0.30, green: 0.30, blue: 0.32),
-                                                        Color(red: 0.03, green: 0.03, blue: 0.05)],
-                                               startPoint: .top, endPoint: .bottom)
-                                Image(systemName: "heart.fill")
-                                    .font(.system(size: 72))
-                                    .foregroundStyle(.white.opacity(0.9))
-                            }
-                            .aspectRatio(1, contentMode: .fill)
-                            .clipShape(RoundedRectangle(cornerRadius: TVDS.cover, style: .continuous))
-                        }
-                        .buttonStyle(.borderless)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Liked Songs").font(.callout).lineLimit(1)
-                            Text("\(client.favoriteIds.count) songs")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, 4)
-                    }
+                    TVGradientTile(title: "Liked Songs",
+                                   subtitle: "\(client.favoriteIds.count) songs",
+                                   icon: "heart.fill",
+                                   top: Color(red: 0.30, green: 0.30, blue: 0.32)) { route = .liked }
 
                     // All the library's music videos as one playlist.
                     if !TVVideoController.shared.videos.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Button { route = .musicVideos } label: {
-                                ZStack {
-                                    LinearGradient(colors: [Color(red: 0.16, green: 0.18, blue: 0.30),
-                                                            Color(red: 0.03, green: 0.03, blue: 0.05)],
-                                                   startPoint: .top, endPoint: .bottom)
-                                    Image(systemName: "play.rectangle.fill")
-                                        .font(.system(size: 72))
-                                        .foregroundStyle(.white.opacity(0.9))
-                                }
-                                .aspectRatio(1, contentMode: .fill)
-                                .clipShape(RoundedRectangle(cornerRadius: TVDS.cover, style: .continuous))
-                            }
-                            .buttonStyle(.borderless)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Music Videos").font(.callout).lineLimit(1)
-                                Text("\(TVVideoController.shared.videos.count) videos")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 4)
-                        }
+                        TVGradientTile(title: "Music Videos",
+                                       subtitle: "\(TVVideoController.shared.videos.count) videos",
+                                       icon: "play.rectangle.fill",
+                                       top: Color(red: 0.16, green: 0.18, blue: 0.30)) { route = .musicVideos }
                     }
 
                     ForEach(playlists) { p in
@@ -305,6 +274,46 @@ struct TVSearchView: View {
                 guard !Task.isCancelled else { return }
                 results = (try? await client.search(query: q)) ?? []
             }
+        }
+    }
+}
+
+// MARK: - Gradient tile (Liked Songs / Music Videos)
+
+/// A synthetic playlist tile (gradient + icon) that focuses exactly like a TVCoverCard: bare button
+/// (no system white platter), 1.08 magnification + shadow.
+struct TVGradientTile: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let top: Color
+    let action: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button(action: action) {
+                ZStack {
+                    LinearGradient(colors: [top, Color(red: 0.03, green: 0.03, blue: 0.05)],
+                                   startPoint: .top, endPoint: .bottom)
+                    Image(systemName: icon)
+                        .font(.system(size: 72))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+                .aspectRatio(1, contentMode: .fill)
+                .clipShape(RoundedRectangle(cornerRadius: TVDS.cover, style: .continuous))
+            }
+            .buttonStyle(.tvBare)
+            .focused($focused)
+            .scaleEffect(focused ? 1.08 : 1.0)
+            .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 22 : 0, y: focused ? 14 : 0)
+            .animation(.easeOut(duration: 0.18), value: focused)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.callout).lineLimit(1)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 4)
         }
     }
 }
