@@ -31,7 +31,12 @@ struct TVNowPlayingView: View {
                     // shrinks and DOCKS toward the footer. Only the DOCK moves — the footer stays put.
                     let docked = inVideoMode
                     TVNowPlayingArtwork(coverSize: docked ? 150 : 400)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: docked ? .bottom : .center)
+                        // Docked: clamp to the cover width so it can sit at the LEFT (otherwise the
+                        // carousel fills the row and re-centres the cover). Audio: fill + centre.
+                        .frame(maxWidth: docked ? 150 : .infinity)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity,
+                               alignment: docked ? .bottomLeading : .center)
+                        .padding(.leading, docked ? 80 : 0)
                         .padding(.bottom, docked ? 24 : 0)
                         .animation(.spring(response: 0.5, dampingFraction: 0.86), value: docked)
                 } else if let remote = SessionHub.shared.remote {
