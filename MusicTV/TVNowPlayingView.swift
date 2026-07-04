@@ -22,8 +22,13 @@ struct TVNowPlayingView: View {
 
     // The transport buttons in the footer block. While one is focused the footer must NOT auto-hide —
     // removing a focused view makes the tvOS focus engine jump unpredictably (usually to the tab bar).
-    private enum ControlButton: Hashable { case previous, playPause, next }
+    private enum ControlButton: Hashable { case previous, playPause, next, lyrics, queue }
     @FocusState private var controlFocus: ControlButton?
+
+    /// The open side pane. While one is showing the artwork docks bottom-left (like video mode) and
+    /// the pane fills the centre.
+    private enum NPPane { case lyrics, queue }
+    @State private var pane: NPPane?
 
     var body: some View {
         // VStack, NOT a ZStack: the fixed footer is the bottom row and the moving carousel fills the row
@@ -36,18 +41,25 @@ struct TVNowPlayingView: View {
                     // Music Videos playlist: the video IS the content (its own audio). No audio carousel.
                     Color.clear
                 } else if player.currentItem != nil {
-                    // The skeuomorphic cover-flow carousel: cover + CD + reflection with the prev/next
-                    // tracks flanking it. Centred for plain audio; when a music video is the backdrop it
-                    // shrinks and DOCKS toward the footer. Only the DOCK moves — the footer stays put.
-                    let docked = inVideoMode
-                    TVNowPlayingArtwork(coverSize: docked ? 150 : 400, docked: docked,
-                                        onInteract: bumpFooter,
-                                        onFocusControls: focusControls)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity,
-                               alignment: docked ? .bottomLeading : .center)
-                        .padding(.leading, docked ? 80 : 0)
-                        .padding(.bottom, docked ? 24 : 0)
-                        .animation(.spring(response: 0.5, dampingFraction: 0.86), value: docked)
+                    // The skeuomorphic cover-flow carousel: cover + CD + reflection. Centred for plain
+                    // audio; when a music video is the backdrop OR a pane (lyrics/queue) is open it
+                    // shrinks and DOCKS bottom-left. Only the DOCK moves — the footer stays put.
+                    let docked = inVideoMode || pane != nil
+                    ZStack {
+                        TVNowPlayingArtwork(coverSize: docked ? 150 : 400, docked: docked,
+                                            onInteract: bumpFooter,
+                                            onFocusControls: focusControls)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                                   alignment: docked ? .bottomLeading : .center)
+                            .padding(.leading, docked ? 80 : 0)
+                            .padding(.bottom, docked ? 24 : 0)
+                            .animation(.spring(response: 0.5, dampingFraction: 0.86), value: docked)
+
+                        if let pane {
+                            paneView(pane)
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.3), value: pane)
                 } else if let remote = SessionHub.shared.remote {
                     // Another device of this account is playing — mirror it and offer remote control.
                     remoteMirror(remote)
@@ -83,11 +95,19 @@ struct TVNowPlayingView: View {
         .onChange(of: player.currentItem?.id) { _, _ in bumpFooter() }
         .onChange(of: player.isPlaying) { _, _ in bumpFooter() }
         .onChange(of: controlFocus) { _, _ in bumpFooter() }
+        .onChange(of: pane) { _, _ in bumpFooter() }
+        .onDisappear { pane = nil }   // leaving the tab closes any open pane
         .background {
-            if inVideoMode, let av = videoCtl.avPlayer {
-                TVVideoLayer(player: av).ignoresSafeArea().transition(.opacity)
-            } else {
-                TVBackdrop(item: player.currentItem ?? SessionHub.shared.remote?.item)
+            ZStack {
+                if inVideoMode, let av = videoCtl.avPlayer {
+                    TVVideoLayer(player: av).ignoresSafeArea().transition(.opacity)
+                } else {
+                    TVBackdrop(item: player.currentItem ?? SessionHub.shared.remote?.item)
+                }
+                // A pane needs contrast over whatever's behind (especially a playing video).
+                if pane != nil {
+                    Color.black.opacity(0.45).ignoresSafeArea().allowsHitTesting(false)
+                }
             }
         }
         // The tab bar stays visible here like every other page (play/pause is handled globally at the
@@ -117,7 +137,8 @@ struct TVNowPlayingView: View {
         footerIdle?.cancel()
         footerIdle = Task {
             try? await Task.sleep(for: .seconds(4))
-            if !Task.isCancelled, controlFocus == nil { footerVisible = false }
+            // Never hide while a button holds focus or a pane is open (the buttons are its way out).
+            if !Task.isCancelled, controlFocus == nil, pane == nil { footerVisible = false }
         }
     }
 
@@ -163,9 +184,47 @@ struct TVNowPlayingView: View {
             }
             .focused($controlFocus, equals: .next)
             .disabled(!direct && !player.canGoNext)
+
+            // Lyrics / Queue panes — audio + matched-video only (the direct playlist has no
+            // audio queue, and its video IS the content).
+            if !direct {
+                Button {
+                    bumpFooter()
+                    pane = (pane == .lyrics) ? nil : .lyrics
+                } label: {
+                    Image(systemName: pane == .lyrics ? "quote.bubble.fill" : "quote.bubble").font(.title3)
+                }
+                .focused($controlFocus, equals: .lyrics)
+                .padding(.leading, 24)
+
+                Button {
+                    bumpFooter()
+                    pane = (pane == .queue) ? nil : .queue
+                } label: {
+                    Image(systemName: "list.triangle").font(.title3)
+                }
+                .focused($controlFocus, equals: .queue)
+            }
         }
         .buttonStyle(.glass)
         .buttonBorderShape(.circle)
+    }
+
+    /// The open pane, centred in the free area while the artwork docks bottom-left. Bottom padding
+    /// keeps its content clear of the docked cover + reflection.
+    @ViewBuilder
+    private func paneView(_ pane: NPPane) -> some View {
+        Group {
+            switch pane {
+            case .lyrics: TVLyricsPane()
+            case .queue:  TVQueuePane { self.pane = nil }
+            }
+        }
+        .frame(maxWidth: 1040)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 30)
+        .padding(.bottom, 210)
+        .transition(.opacity.combined(with: .move(edge: .trailing)))
     }
 
     /// The playhead as a fixed full-width footer pinned to the bottom of the screen — the default tvOS
