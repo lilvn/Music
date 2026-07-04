@@ -76,11 +76,10 @@ struct TVNowPlayingView: View {
 
     // MARK: - Chrome (minimal liquid glass)
 
-    /// The playhead, sitting right under the carousel.
+    /// The playhead, sitting right under the carousel — the default tvOS progress bar, no custom chrome.
     private var progressBar: some View {
         VStack(spacing: 8) {
             ProgressView(value: player.duration > 0 ? min(player.currentTime / player.duration, 1) : 0)
-                .tint(.white)
             HStack {
                 Text(player.currentTime.formattedDuration)
                 Spacer()
@@ -88,10 +87,7 @@ struct TVNowPlayingView: View {
             }
             .font(.caption).monospacedDigit().foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 14)
         .frame(width: 640)
-        .background(.ultraThinMaterial, in: .rect(cornerRadius: 22))
     }
 
     /// Mirror of a remote session: its artwork + track, with controls that drive THAT device.
