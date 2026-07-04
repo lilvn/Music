@@ -8,10 +8,12 @@ enum TVTab: Hashable { case home, albums, playlists, nowPlaying, search }
 struct TVRootView: View {
     @Environment(Player.self) private var player
     @State private var tab: TVTab = .home
+    /// Focus lives INSIDE the mini bar's expanded transport (nav pills hidden, Menu collapses it).
+    @State private var engaged = false
 
     var body: some View {
         VStack(spacing: 0) {
-            TVNavBar(tab: $tab)
+            TVNavBar(tab: $tab, engaged: $engaged)
 
             TabView(selection: $tab) {
                 Tab("Home", systemImage: "house.fill", value: TVTab.home) { TVHomeView().toolbar(.hidden, for: .tabBar) }
@@ -22,8 +24,9 @@ struct TVRootView: View {
             }
         }
         .background(Color.black.ignoresSafeArea())
-        // Starting playback anywhere jumps straight to Now Playing.
-        .environment(\.tvOpenNowPlaying) { tab = .nowPlaying }
+        // Starting playback anywhere jumps straight to Now Playing with the transport open.
+        .environment(\.tvOpenNowPlaying) { tab = .nowPlaying; engaged = true }
+        .onChange(of: tab) { _, t in if t != .nowPlaying { engaged = false } }
         // The Siri Remote play/pause button toggles playback from ANY tab / focus — including a track
         // restored (paused) at launch, where focus never reached Now Playing's own handler. The direct
         // Music Videos playlist toggles the video; everything else the audio.
@@ -36,36 +39,51 @@ struct TVRootView: View {
 
 // MARK: - The custom nav bar
 
-/// Home / Albums / Playlists as text pills + the mini-bar pill (= Now Playing) in ONE glass capsule,
-/// then Search as its own separated pill and, when another device is playing, the Transfer button —
-/// everything focusable, so the whole top row works like the iOS bar.
+/// Home / Albums / Playlists in one glass capsule, the mini bar as its OWN separate pill (like iOS),
+/// Search as another separated pill, and the Transfer button — everything focusable. Clicking the mini
+/// bar opens Now Playing and EXPANDS the pill into the transport (`engaged`): the nav pills slide away
+/// and focus moves inside to previous / play-pause / next / lyrics / queue / scrub; Menu collapses it.
 private struct TVNavBar: View {
     @Binding var tab: TVTab
+    @Binding var engaged: Bool
 
     var body: some View {
         HStack(spacing: 18) {
-            HStack(spacing: 4) {
-                TVNavTextItem(title: "Home", selected: tab == .home) { tab = .home }
-                TVNavTextItem(title: "Albums", selected: tab == .albums) { tab = .albums }
-                TVNavTextItem(title: "Playlists", selected: tab == .playlists) { tab = .playlists }
-                // The mini bar IS the Now Playing item: current track + progress fill; click opens it.
-                TVNavMiniPill(selected: tab == .nowPlaying) { tab = .nowPlaying }
-            }
-            .padding(5)
-            .glassEffect(.regular, in: .capsule)
-
-            // Search — a separated pill, like the iOS search tab.
-            TVNavIconItem(icon: "magnifyingglass", selected: tab == .search) { tab = .search }
+            if engaged {
+                // The mini bar, expanded into the transport — the only thing in the bar.
+                TVNavTransportPill(engaged: $engaged)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .top)))
+            } else {
+                HStack(spacing: 4) {
+                    TVNavTextItem(title: "Home", selected: tab == .home) { tab = .home }
+                    TVNavTextItem(title: "Albums", selected: tab == .albums) { tab = .albums }
+                    TVNavTextItem(title: "Playlists", selected: tab == .playlists) { tab = .playlists }
+                }
                 .padding(5)
                 .glassEffect(.regular, in: .capsule)
 
-            // Focusable here in the bar (its old floating overlay was unreachable by the focus engine).
-            TransferButton()
+                // The mini bar: its own pill. Click = open Now Playing (+ transport for local playback).
+                TVNavMiniPill(selected: tab == .nowPlaying) { engage in
+                    tab = .nowPlaying
+                    if engage { engaged = true }
+                }
+                .padding(5)
+                .glassEffect(.regular, in: .capsule)
+
+                // Search — a separated pill, like the iOS search tab.
+                TVNavIconItem(icon: "magnifyingglass", selected: tab == .search) { tab = .search }
+                    .padding(5)
+                    .glassEffect(.regular, in: .capsule)
+
+                // Focusable here in the bar (its old floating overlay was unreachable by the focus engine).
+                TransferButton()
+            }
         }
         .focusSection()
         .frame(maxWidth: .infinity)
         .padding(.top, 24)
         .padding(.bottom, 12)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: engaged)
     }
 }
 

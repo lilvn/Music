@@ -190,66 +190,68 @@ struct TVFlowCover: View {
     }
 }
 
-// MARK: - The nav bar's mini pill (the Now Playing tab item)
+// MARK: - The nav bar's mini pill (the Now Playing item — its OWN pill, like iOS)
 
-/// The mini bar AS a nav-bar pill: it sits inside the custom nav bar in place of a "Now Playing" text
-/// tab. Small spinning CD + title/artist, the artwork-wash fill showing progress (live-extrapolated for
-/// a remote session), and clicking it opens the Now Playing page. When nothing is playing anywhere it
-/// falls back to a plain "Now Playing" text pill.
-struct TVNavMiniPill: View {
-    let selected: Bool
-    let action: () -> Void
+/// What the mini bar mirrors — same priority as the accessory on iOS: direct video, an ACTIVELY
+/// playing remote session, the local track, any remote session, else nothing.
+struct TVPillModel {
+    let item: MediaItem
+    let sub: String?
+    let spinning: Bool
+    let remote: SessionHub.RemoteSession?   // non-nil → live-extrapolate the fill
 
-    @Environment(Player.self) private var player
-    @FocusState private var focused: Bool
-    private let cover: CGFloat = 34
-    @State private var width: CGFloat = 1
-
-    private struct PillModel {
-        let item: MediaItem
-        let sub: String?
-        let spinning: Bool
-        let remote: SessionHub.RemoteSession?   // non-nil → live-extrapolate the fill
-    }
-
-    /// What the pill mirrors — same priority as the accessory on iOS: direct video, an ACTIVELY
-    /// playing remote session, the local track, any remote session, else nothing.
-    private var model: PillModel? {
+    @MainActor
+    static func current(_ player: Player) -> TVPillModel? {
         let videoCtl = TVVideoController.shared
         if videoCtl.direct, let video = videoCtl.activeVideo {
-            return PillModel(item: video, sub: video.primaryArtist, spinning: true, remote: nil)
+            return TVPillModel(item: video, sub: video.primaryArtist, spinning: !videoCtl.directPaused, remote: nil)
         }
         if let r = SessionHub.shared.remote, !r.isPaused, !player.isPlaying {
-            return PillModel(item: r.item, sub: r.deviceName, spinning: true, remote: r)
+            return TVPillModel(item: r.item, sub: r.deviceName, spinning: true, remote: r)
         }
         if let item = player.currentItem {
-            return PillModel(item: item, sub: item.primaryArtist, spinning: player.isPlaying, remote: nil)
+            return TVPillModel(item: item, sub: item.primaryArtist, spinning: player.isPlaying, remote: nil)
         }
         if let r = SessionHub.shared.remote {
-            return PillModel(item: r.item, sub: r.deviceName, spinning: !r.isPaused, remote: r)
+            return TVPillModel(item: r.item, sub: r.deviceName, spinning: !r.isPaused, remote: r)
         }
         return nil
     }
 
-    private func progress(at date: Date, _ m: PillModel) -> Double {
-        if let r = m.remote {
-            let dur = max(r.durationSeconds, 1)
-            return min(max(r.livePosition(at: date) / dur, 0), 1)
+    @MainActor
+    func progress(at date: Date, _ player: Player) -> Double {
+        if let remote {
+            let dur = max(remote.durationSeconds, 1)
+            return min(max(remote.livePosition(at: date) / dur, 0), 1)
         }
         let ctl = TVVideoController.shared
         if ctl.direct { return ctl.directProgress }
         return player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0
     }
+}
+
+/// The COMPACT mini bar: its own Liquid Glass pill in the nav bar — spinning CD (like the iPhone bar)
+/// + title/artist with the artwork-wash progress fill. Focus grows it; CLICK hands off to the caller,
+/// which opens Now Playing and (for local playback) expands this pill into the transport.
+struct TVNavMiniPill: View {
+    let selected: Bool
+    /// Called on click; `engage` is true when local playback exists (the pill can become the transport).
+    let action: (_ engage: Bool) -> Void
+
+    @Environment(Player.self) private var player
+    @FocusState private var focused: Bool
+    @State private var width: CGFloat = 1
 
     var body: some View {
-        Button(action: action) {
+        let model = TVPillModel.current(player)
+        Button {
+            let videoCtl = TVVideoController.shared
+            action(player.currentItem != nil || videoCtl.direct)
+        } label: {
             if let m = model {
-                // Media pill: artwork fill shows through; focus = white ring + slight grow (a white
-                // platter would fight the fill).
-                HStack(spacing: 10) {
-                    TVFlowCover(item: m.item, size: cover, discOut: true, spinning: m.spinning,
-                                showReflection: false, showLabel: false)
-                        .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)
+                HStack(spacing: 12) {
+                    // The round CD itself, spinning — the iOS mini bar look.
+                    TVSpinningDisc(item: m.item, size: 38, spinning: m.spinning)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(m.item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
                         if let sub = m.sub, !sub.isEmpty {
@@ -258,9 +260,9 @@ struct TVNavMiniPill: View {
                     }
                     .frame(maxWidth: 240, alignment: .leading)
                 }
-                .padding(.leading, 6)
+                .padding(.leading, 8)
                 .padding(.trailing, 18)
-                .padding(.vertical, 5)
+                .padding(.vertical, 7)
                 .background(
                     Capsule().fill(selected && !focused ? AnyShapeStyle(.white.opacity(0.16))
                                                         : AnyShapeStyle(.clear))
@@ -272,7 +274,7 @@ struct TVNavMiniPill: View {
                             .frame(width: width)
                             .frame(maxHeight: .infinity)
                             .mask(alignment: .leading) {
-                                Rectangle().frame(width: max(0, width * progress(at: ctx.date, m)))
+                                Rectangle().frame(width: max(0, width * m.progress(at: ctx.date, player)))
                             }
                     }
                     .allowsHitTesting(false)
@@ -285,7 +287,8 @@ struct TVNavMiniPill: View {
                 }
                 .clipShape(Capsule())
                 .overlay(Capsule().strokeBorder(.white.opacity(focused ? 0.95 : 0), lineWidth: 2))
-                .scaleEffect(focused ? 1.04 : 1.0)
+                // "Expands on top" when the remote lands on it.
+                .scaleEffect(focused ? 1.08 : 1.0, anchor: .top)
             } else {
                 // Nothing playing anywhere — a plain text tab like its siblings.
                 Text("Now Playing")
@@ -303,6 +306,142 @@ struct TVNavMiniPill: View {
         .buttonStyle(.tvBare)
         .focused($focused)
         .animation(.easeOut(duration: 0.15), value: focused)
+    }
+}
+
+// MARK: - The EXPANDED mini bar: the transport pill
+
+/// The mini bar grown into the full transport (click the compact pill to get here): CD + track text,
+/// previous / play-pause / next, lyrics + queue toggles, and a focusable scrub bar — all inside ONE
+/// glass pill at the top, exactly like the iOS mini bar owning playback. Menu (back) collapses it and
+/// returns focus to the nav bar.
+struct TVNavTransportPill: View {
+    @Binding var engaged: Bool
+
+    @Environment(Player.self) private var player
+    @Environment(JellyfinClient.self) private var client
+    private enum Ctl: Hashable { case prev, play, next, lyrics, queue, scrub }
+    @FocusState private var focus: Ctl?
+
+    private var videoCtl: TVVideoController { TVVideoController.shared }
+
+    var body: some View {
+        let direct = videoCtl.direct
+        let item = direct ? videoCtl.activeVideo : player.currentItem
+        VStack(spacing: 12) {
+            HStack(spacing: 16) {
+                if let item {
+                    TVSpinningDisc(item: item, size: 44,
+                                   spinning: direct ? !videoCtl.directPaused : player.isPlaying)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.name).font(.caption).fontWeight(.semibold).lineLimit(1)
+                        Text(item.primaryArtist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    .frame(maxWidth: 230, alignment: .leading)
+                }
+
+                Spacer(minLength: 16)
+
+                controlButton(.prev, "backward.fill") {
+                    if direct { videoCtl.skipDirect(-1, client: client, audio: player) }
+                    else { player.previousTrack() }
+                }
+                controlButton(.play, (direct ? !videoCtl.directPaused : player.isPlaying) ? "pause.fill" : "play.fill") {
+                    direct ? videoCtl.togglePlayPause() : player.togglePlayPause()
+                }
+                controlButton(.next, "forward.fill") {
+                    if direct { videoCtl.skipDirect(+1, client: client, audio: player) }
+                    else { player.nextTrack() }
+                }
+
+                if !direct {
+                    controlButton(.lyrics, TVNowPlayingUI.shared.pane == .lyrics ? "quote.bubble.fill" : "quote.bubble") {
+                        TVNowPlayingUI.shared.toggle(.lyrics)
+                    }
+                    .padding(.leading, 10)
+                    controlButton(.queue, "list.triangle") {
+                        TVNowPlayingUI.shared.toggle(.queue)
+                    }
+                }
+            }
+
+            scrubBar(direct: direct)
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 14)
+        .frame(width: 980)
+        // The artwork wash fills the whole transport (it IS the now-playing surface).
+        .background {
+            if let item {
+                TVArtworkFill(item: item).opacity(0.55).allowsHitTesting(false)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
+        .glassEffect(.regular, in: .rect(cornerRadius: 34))
+        .focusSection()
+        // Menu/back collapses the transport and hands the nav bar back.
+        .onExitCommand { engaged = false }
+        .onAppear {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(80))
+                focus = .play
+            }
+        }
+    }
+
+    /// One round transport control: white circle + black glyph when focused, quiet wash otherwise.
+    private func controlButton(_ id: Ctl, _ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(focus == id ? AnyShapeStyle(.black) : AnyShapeStyle(.primary))
+                .frame(width: 50, height: 50)
+                .background(Circle().fill(focus == id ? AnyShapeStyle(.white)
+                                                      : AnyShapeStyle(.white.opacity(0.10))))
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(.tvBare)
+        .focused($focus, equals: id)
+        .animation(.easeOut(duration: 0.12), value: focus)
+    }
+
+    /// The progress bar — FOCUSABLE for audio: land on it and swipe left/right to scrub (±10s a step,
+    /// the tvOS equivalent of the iPhone's hold-and-drag). Direct video shows progress read-only.
+    @ViewBuilder
+    private func scrubBar(direct: Bool) -> some View {
+        let scrubFocused = focus == .scrub
+        HStack(spacing: 14) {
+            Text((direct ? 0 : player.currentTime).formattedDuration)
+                .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+
+            GeometryReader { g in
+                let frac: Double = direct
+                    ? videoCtl.directProgress
+                    : (player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.22))
+                    Capsule().fill(.white.opacity(scrubFocused ? 1.0 : 0.75))
+                        .frame(width: max(6, g.size.width * frac))
+                }
+            }
+            .frame(height: scrubFocused ? 10 : 5)
+            .animation(.easeOut(duration: 0.15), value: scrubFocused)
+
+            Text((direct ? 0 : player.duration).formattedDuration)
+                .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
+        }
+        .contentShape(Rectangle())
+        .focusable(!direct)
+        .focused($focus, equals: .scrub)
+        .onMoveCommand { dir in
+            guard focus == .scrub else { return }
+            switch dir {
+            case .left:  player.seek(to: max(0, player.currentTime - 10))
+            case .right: player.seek(to: min(player.duration, player.currentTime + 10))
+            case .up:    focus = .play   // onMoveCommand consumes ALL moves — route up out manually
+            default: break
+            }
+        }
     }
 }
 
