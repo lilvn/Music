@@ -24,15 +24,16 @@ struct TVRootView: View {
             let v = TVVideoController.shared
             v.direct ? v.togglePlayPause() : player.togglePlayPause()
         }
-        // "Transfer to this device" floats top-right whenever another device is the one playing.
-        .overlay(alignment: .topTrailing) {
+        // "Transfer to this device" floats top-left whenever another device is the one playing (the
+        // mini-bar pill owns the top-right).
+        .overlay(alignment: .topLeading) {
             TransferButton()
-                .padding(.trailing, 60)
+                .padding(.leading, 60)
                 .padding(.top, 20)
         }
-        // The mini bar: a full-width Liquid Glass bar across the bottom of every BROWSE page, like the
-        // iPhone's. Hidden on the Now Playing tab, which has the full carousel instead. Non-focusable chrome.
-        .overlay(alignment: .bottom) {
+        // The mini bar: a small Liquid Glass PILL in the top-right, beside the nav bar. Hidden on the
+        // Now Playing tab, which has the full carousel instead. Non-focusable chrome.
+        .overlay(alignment: .topTrailing) {
             let videoCtl = TVVideoController.shared
             Group {
                 if tab == .nowPlaying {
@@ -51,8 +52,8 @@ struct TVRootView: View {
                                     spinning: !remote.isPaused)
                 }
             }
-            .padding(.horizontal, 48)
-            .padding(.bottom, 36)
+            .padding(.trailing, 60)
+            .padding(.top, 24)
         }
     }
 }
