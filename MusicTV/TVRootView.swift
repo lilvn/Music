@@ -9,11 +9,13 @@ struct TVRootView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            Tab("Home", systemImage: "house.fill", value: TVTab.home) { TVHomeView() }
-            Tab("Albums", systemImage: "square.stack.fill", value: TVTab.albums) { TVAlbumsView() }
-            Tab("Playlists", systemImage: "music.note.list", value: TVTab.playlists) { TVPlaylistsView() }
+            // Browse tabs reserve top clearance while the mini bar is showing, so pages START below
+            // it (nav bar → mini bar → page) and scroll under its glass. Now Playing has no bar.
+            Tab("Home", systemImage: "house.fill", value: TVTab.home) { TVHomeView().tvMiniBarClearance() }
+            Tab("Albums", systemImage: "square.stack.fill", value: TVTab.albums) { TVAlbumsView().tvMiniBarClearance() }
+            Tab("Playlists", systemImage: "music.note.list", value: TVTab.playlists) { TVPlaylistsView().tvMiniBarClearance() }
             Tab("Now Playing", systemImage: "waveform", value: TVTab.nowPlaying) { TVNowPlayingView() }
-            Tab("Search", systemImage: "magnifyingglass", value: TVTab.search, role: .search) { TVSearchView() }
+            Tab("Search", systemImage: "magnifyingglass", value: TVTab.search, role: .search) { TVSearchView().tvMiniBarClearance() }
         }
         // Starting playback anywhere jumps straight to Now Playing.
         .environment(\.tvOpenNowPlaying) { tab = .nowPlaying }
@@ -58,6 +60,35 @@ struct TVRootView: View {
             .allowsHitTesting(false)
         }
     }
+}
+
+/// Whether the mini bar is currently showing (mirrors TVRootView's overlay branches, minus the tab check).
+@MainActor
+func tvMiniBarShowing(_ player: Player) -> Bool {
+    let videoCtl = TVVideoController.shared
+    if videoCtl.direct, videoCtl.activeVideo != nil { return true }
+    if player.currentItem != nil { return true }
+    return SessionHub.shared.remote != nil
+}
+
+/// Reserves the mini bar's slot at the top of a browse page: the page lays out BELOW the bar (nav bar →
+/// mini bar → content) and its content scrolls under the bar's glass, exactly like a nav bar.
+private struct TVMiniBarClearance: ViewModifier {
+    @Environment(Player.self) private var player
+    func body(content: Content) -> some View {
+        let showing = tvMiniBarShowing(player)
+        content
+            // Bar bottom sits at ~194 (126 top + 68 height); pages' own top safe area is ~60, so ~150
+            // more puts the first row just under the bar with a small gap. contentMargins propagates
+            // INTO the page's ScrollView (outer safeAreaPadding/safeAreaInset never reached it through
+            // the NavigationStack), and content still scrolls under the bar's glass.
+            .contentMargins(.top, showing ? 150 : 0, for: .scrollContent)
+            .animation(.easeInOut(duration: 0.25), value: showing)
+    }
+}
+
+extension View {
+    func tvMiniBarClearance() -> some View { modifier(TVMiniBarClearance()) }
 }
 
 // MARK: - Home
