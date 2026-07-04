@@ -138,7 +138,7 @@ struct TVFlowCover: View {
                         .scaleEffect(y: -1)
                         .frame(height: size * fraction, alignment: .top)
                         .mask(
-                            LinearGradient(colors: [.white.opacity(0.4), .clear],
+                            LinearGradient(colors: [.white.opacity(0.18), .clear],
                                            startPoint: .top, endPoint: .bottom)
                                 .frame(width: size * 2.4, height: size * fraction)
                         )
@@ -356,7 +356,10 @@ struct TVNowPlayingArtwork: View {
     private func cover(_ item: MediaItem) -> some View {
         let art = TVFlowCover(item: item,
                               size: coverSize,
-                              discOut: discOut && !nearEnd,
+                              // In the small dock keep the CD permanently out — the tuck-in choreography
+                              // isn't needed there, and a track-change retract could otherwise leave it
+                              // hidden (the "missing CD" in the corner).
+                              discOut: docked ? true : (discOut && !nearEnd),
                               spinning: player.isPlaying,
                               showReflection: true,
                               emphasized: !docked,
