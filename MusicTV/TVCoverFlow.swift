@@ -138,7 +138,7 @@ struct TVFlowCover: View {
                         .scaleEffect(y: -1)
                         .frame(height: size * fraction, alignment: .top)
                         .mask(
-                            LinearGradient(colors: [.white.opacity(0.18), .clear],
+                            LinearGradient(colors: [.white.opacity(0.4), .clear],
                                            startPoint: .top, endPoint: .bottom)
                                 .frame(width: size * 2.4, height: size * fraction)
                         )
@@ -287,6 +287,9 @@ private struct TVArtworkFill: View {
 struct TVNowPlayingArtwork: View {
     @Environment(Player.self) private var player
     let coverSize: CGFloat
+    /// Docked (video backdrop): the label sits to the RIGHT of the cover, and the whole thing hugs the
+    /// left. Undocked (audio): big centred cover with its title/artist in the reflection below.
+    var docked = false
     @FocusState private var focused: Bool
 
     // ---- Track-change choreography -------------------------------------------------------------
@@ -311,12 +314,7 @@ struct TVNowPlayingArtwork: View {
         // still steps prev/next tracks — the neighbour covers just aren't drawn.)
         Group {
             if let item = player.currentItem {
-                TVFlowCover(item: item,
-                            size: coverSize,
-                            discOut: discOut && !nearEnd,
-                            spinning: player.isPlaying,
-                            showReflection: true,
-                            emphasized: true)
+                cover(item)
                     // Unique per queue-slot (the same song can sit in the queue twice) so a track
                     // change swaps the view and the transition below runs.
                     .id("\(player.queue.currentIndex)-\(item.id)")
@@ -324,7 +322,7 @@ struct TVNowPlayingArtwork: View {
             }
         }
         .animation(.easeInOut(duration: 0.32), value: player.queue.currentIndex)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: docked ? .leading : .center)
         .contentShape(Rectangle())
         .focusable()
         .focused($focused)
@@ -351,6 +349,30 @@ struct TVNowPlayingArtwork: View {
             discOut = true
         }
         .animation(.easeOut(duration: 0.2), value: focused)
+    }
+
+    /// The cover + CD, with the label below (audio) or to the right (docked over a video).
+    @ViewBuilder
+    private func cover(_ item: MediaItem) -> some View {
+        let art = TVFlowCover(item: item,
+                              size: coverSize,
+                              discOut: discOut && !nearEnd,
+                              spinning: player.isPlaying,
+                              showReflection: true,
+                              emphasized: !docked,
+                              showLabel: !docked)
+        if docked {
+            HStack(alignment: .center, spacing: 22) {
+                art.padding(.trailing, coverSize * TVSpinningDisc.pullOutRatio)   // room for the slid-out CD
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.name).font(.subheadline).fontWeight(.semibold).lineLimit(2)
+                    Text(item.primaryArtist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .frame(maxWidth: 300, alignment: .leading)
+            }
+        } else {
+            art
+        }
     }
 
     // MARK: Choreography

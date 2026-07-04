@@ -30,10 +30,7 @@ struct TVNowPlayingView: View {
                     // tracks flanking it. Centred for plain audio; when a music video is the backdrop it
                     // shrinks and DOCKS toward the footer. Only the DOCK moves — the footer stays put.
                     let docked = inVideoMode
-                    TVNowPlayingArtwork(coverSize: docked ? 150 : 400)
-                        // Docked: clamp to the cover width so it can sit at the LEFT (otherwise the
-                        // carousel fills the row and re-centres the cover). Audio: fill + centre.
-                        .frame(maxWidth: docked ? 150 : .infinity)
+                    TVNowPlayingArtwork(coverSize: docked ? 150 : 400, docked: docked)
                         .frame(maxWidth: .infinity, maxHeight: .infinity,
                                alignment: docked ? .bottomLeading : .center)
                         .padding(.leading, docked ? 80 : 0)
