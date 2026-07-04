@@ -299,6 +299,8 @@ struct TVNowPlayingArtwork: View {
     /// Where the user is heading. Updated by every swipe; drained by the worker one step at a time,
     /// so queued-up swipes play out sequentially instead of being lost.
     @State private var targetIndex: Int?
+    /// The carousel's on-screen width, measured so the neighbours can sit right at the edges.
+    @State private var flowWidth: CGFloat = 1920
 
     /// The song is in its final second — begin tucking the CD in now, so the artwork is ready to swap
     /// the instant the track changes and the next CD pops out as the next song starts.
@@ -306,14 +308,20 @@ struct TVNowPlayingArtwork: View {
         player.isPlaying && player.duration > 1 && player.duration - player.currentTime < 1.0
     }
 
+    /// Push the neighbour covers out to the screen edges: half the width, minus half a neighbour, minus
+    /// a small margin. Never closer than the cover itself (keeps them apart in the tiny docked mode).
+    private var edgeOffset: CGFloat {
+        max(coverSize * 0.7, flowWidth / 2 - (coverSize * 0.6) / 2 - 40)
+    }
+
     var body: some View {
         ZStack {
-            // Previous / next tracks, set well out to either side of the centre.
+            // Previous / next tracks, pushed out to the left/right edges of the screen.
             if let prev = player.previousItem {
-                sideCover(prev).offset(x: -coverSize * 0.95)
+                sideCover(prev).offset(x: -edgeOffset)
             }
             if let next = player.upcomingItem {
-                sideCover(next).offset(x: coverSize * 0.95)
+                sideCover(next).offset(x: edgeOffset)
             }
             // Centre = the current track: reflective, CD out and spinning, choreographed on change.
             Group {
@@ -333,6 +341,13 @@ struct TVNowPlayingArtwork: View {
         }
         .animation(.easeInOut(duration: 0.32), value: player.queue.currentIndex)
         .frame(maxWidth: .infinity)
+        // One instance (not a grid cell), so this GeometryReader is safe — it just measures the width
+        // so the neighbours can reach the edges on any screen.
+        .background {
+            GeometryReader { g in
+                Color.clear.onChange(of: g.size.width, initial: true) { _, w in flowWidth = w }
+            }
+        }
         .contentShape(Rectangle())
         .focusable()
         .focused($focused)
