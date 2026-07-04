@@ -203,7 +203,7 @@ struct TVNowPlayingBug: View {
     var spinning = true
 
     @Environment(Player.self) private var player
-    private let cover: CGFloat = 104
+    private let cover: CGFloat = 72
     @State private var width: CGFloat = 1
 
     /// 0…1 playhead for the current track — the audio Player (normal + matched-video) or the direct
@@ -215,29 +215,34 @@ struct TVNowPlayingBug: View {
     }
 
     var body: some View {
-        // A compact Liquid Glass shelf: cover + CD on the left, track text on the right.
-        HStack(alignment: .center, spacing: 26) {
-            // The shelf carries its own text, so hide the cover's built-in label.
+        // A full-width Liquid Glass mini bar like the iPhone's: spinning CD + track text on the left,
+        // play-state on the right, and the artwork-wash fill revealing left→right as the track plays.
+        HStack(alignment: .center, spacing: 22) {
+            // The bar carries its own text, so hide the cover's built-in label.
             TVFlowCover(item: item, size: cover, discOut: true, spinning: spinning,
                         showReflection: false, showLabel: false)
                 .padding(.trailing, cover * TVSpinningDisc.pullOutRatio)   // room for the slid-out disc
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(item.name)
-                    .font(.caption).fontWeight(.semibold)
+                    .font(.callout).fontWeight(.semibold)
                     .lineLimit(1)
-                if let artistLine, !artistLine.isEmpty {
-                    Text(artistLine).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-                if let albumLine, !albumLine.isEmpty {
-                    Text(albumLine).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                if let sub = [artistLine, albumLine].compactMap({ $0 }).filter({ !$0.isEmpty }).first {
+                    Text(sub).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
-            .frame(maxWidth: 320, alignment: .leading)
+
+            Spacer(minLength: 24)
+
+            Image(systemName: spinning ? "pause.fill" : "play.fill")
+                .font(.title3)
+                .foregroundStyle(.primary.opacity(0.85))
         }
-        .padding(22)
+        .padding(.horizontal, 40)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
         // Progress FILL, like the iPhone mini bar: the artwork blurred into a wash, revealed left→right
-        // across the shelf as the track plays.
+        // across the bar as the track plays.
         .background(alignment: .leading) {
             TVArtworkFill(item: item)
                 .frame(width: width)
@@ -249,15 +254,15 @@ struct TVNowPlayingBug: View {
                 }
                 .allowsHitTesting(false)
         }
-        // Single instance (not a grid cell), so this GeometryReader is safe — it just reads the shelf's
+        // Single instance (not a grid cell), so this GeometryReader is safe — it just reads the bar's
         // width for the fill mask.
         .background {
             GeometryReader { g in
                 Color.clear.onChange(of: g.size.width, initial: true) { _, w in width = w }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .glassEffect(.regular, in: .rect(cornerRadius: 28))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
     }
 }
 

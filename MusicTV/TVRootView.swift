@@ -30,9 +30,9 @@ struct TVRootView: View {
                 .padding(.trailing, 60)
                 .padding(.top, 20)
         }
-        // The mini bar: a compact Liquid Glass shelf in the bottom-left of every BROWSE page. Hidden on
-        // the Now Playing tab, which has the full carousel instead. Non-focusable visual chrome.
-        .overlay(alignment: .bottomLeading) {
+        // The mini bar: a full-width Liquid Glass bar across the bottom of every BROWSE page, like the
+        // iPhone's. Hidden on the Now Playing tab, which has the full carousel instead. Non-focusable chrome.
+        .overlay(alignment: .bottom) {
             let videoCtl = TVVideoController.shared
             Group {
                 if tab == .nowPlaying {
@@ -51,8 +51,8 @@ struct TVRootView: View {
                                     spinning: !remote.isPaused)
                 }
             }
-            .padding(.leading, 60)
-            .padding(.bottom, 50)
+            .padding(.horizontal, 48)
+            .padding(.bottom, 36)
         }
     }
 }
