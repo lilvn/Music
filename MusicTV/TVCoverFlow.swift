@@ -380,6 +380,8 @@ struct TVNowPlayingArtwork: View {
                     Text(item.primaryArtist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .frame(maxWidth: 300, alignment: .leading)
+                // Legible over the video behind it.
+                .shadow(color: .black.opacity(0.7), radius: 5, y: 2)
             }
         } else {
             art

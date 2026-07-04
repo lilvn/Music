@@ -59,13 +59,15 @@ struct TVNowPlayingView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // The fixed full-width playhead footer — fades on idle, back on interaction.
-            if player.currentItem != nil || videoCtl.direct {
+            // The playhead footer — pinned to the bottom. On idle it slides DOWN and out of the layout
+            // (not just fades) so the content above — the bottom-left docked artwork — drops into its
+            // place. Returns on interaction.
+            if (player.currentItem != nil || videoCtl.direct), footerVisible {
                 progressFooter
-                    .opacity(footerVisible ? 1 : 0)
-                    .animation(.easeInOut(duration: 0.4), value: footerVisible)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .animation(.easeInOut(duration: 0.4), value: footerVisible)
         .onAppear(perform: bumpFooter)
         .onDisappear { footerIdle?.cancel() }
         // Track change and play/pause both bring the bar back.
