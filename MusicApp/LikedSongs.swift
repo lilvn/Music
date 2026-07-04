@@ -40,6 +40,7 @@ struct LikedSongsView: View {
     @State private var tracks: [MediaItem] = []
     @State private var isLoading = true
     @State private var addRequest: PlaylistAddRequest?
+    @State private var showAddMusic = false
     @Namespace private var trackHighlightNS
 
     /// What's actually shown — the loaded order minus anything just unliked, so removing a like (row
@@ -75,11 +76,12 @@ struct LikedSongsView: View {
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) { unlike(track) } label: {
-                                Label("Unlike", systemImage: "heart.slash")
-                            }.tint(.pink)
-                        }
+                        // Regular queue swipes like every other tracklist (trailing = Play Next /
+                        // Play Last); unlike moves to the LEADING swipe + the row's context menu.
+                        .trackSwipeActions(onPlayNext: { player.playNext(track) },
+                                           onPlayLast: { player.playLast(track) },
+                                           onRemove: { unlike(track) },
+                                           removeIcon: "heart.slash")
                 }
             }
         }
@@ -98,8 +100,20 @@ struct LikedSongsView: View {
         .scrollIndicators(.hidden)
         // (highlight animation lives on the row itself — see SongRow — so it never reaches the nav bar)
         .navigationBarTitleDisplayMode(.inline)
-        .fadingDetailHeader()
+        // Same header "+" as the other playlists — adds songs straight to Liked Songs.
+        .fadingDetailHeader {
+            GlassCircleButton(action: { showAddMusic = true }) {
+                Image(systemName: "plus")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+        }
         .sheet(item: $addRequest) { PlaylistPickerSheet(request: $0) }
+        // Reload on dismiss: `displayed` filters `tracks`, so newly-liked songs need the refetch
+        // (which also re-sorts by likeRank, putting them on top).
+        .sheet(isPresented: $showAddMusic, onDismiss: { Task { await reload() } }) {
+            AddMusicToPlaylistSheet(target: .likedSongs)
+        }
         .task { await reload() }
     }
 
@@ -117,34 +131,17 @@ struct LikedSongsView: View {
                 .font(.footnote).foregroundStyle(.secondary)
                 .padding(.top, 4)
 
-            // 2×2 play grid, consistent with the other playlists.
-            VStack(spacing: 12) {
-                HStack(spacing: 12) {
-                    action("Play", "play.fill") { player.play(items: displayed, from: 0) }
-                    action("Shuffle", "shuffle") { player.play(items: displayed, from: 0, shuffled: true) }
-                }
-                HStack(spacing: 12) {
-                    action("Play Last", "text.line.last.and.arrowtriangle.forward") { player.playLast(displayed) }
-                    action("Play Next", "text.line.first.and.arrowtriangle.forward") { player.playNext(displayed) }
-                }
-            }
-            .padding(.horizontal, DS.hPad)
-            .padding(.top, 18)
+            // Just the Play pill, same as every other detail — swiping it queues.
+            SwipeQueuePlayButton(disabled: displayed.isEmpty,
+                                 onPlay: { player.play(items: displayed, from: 0) },
+                                 onPlayNext: { player.playNext(displayed) },
+                                 onPlayLast: { player.playLast(displayed) })
+                .padding(.horizontal, DS.hPad)
+                .padding(.top, 18)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
         .padding(.bottom, 14)   // deliberate, consistent gap down to the first track
-    }
-
-    private func action(_ title: String, _ icon: String, _ run: @escaping () -> Void) -> some View {
-        Button(action: run) {
-            Label(title, systemImage: icon)
-                .font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                .frame(maxWidth: .infinity).frame(height: 46)
-                .glassEffect(.regular.interactive(), in: .capsule)
-        }
-        .buttonStyle(ScaleButtonStyle())
-        .disabled(displayed.isEmpty)
     }
 
     private func reload() async {

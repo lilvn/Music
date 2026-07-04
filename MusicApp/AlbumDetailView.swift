@@ -133,15 +133,12 @@ struct AlbumDetailView: View {
         .padding(.top, 12)
     }
 
-    /// Play pill flanked by round "play last" (left) and "play next" (right).
+    /// Just the Play pill — swiping it queues (right = Play Next, left = Play Last).
     private var playRow: some View {
-        HStack(spacing: 16) {
-            QueueActionButton(icon: "text.line.last.and.arrowtriangle.forward",
-                              disabled: tracks.isEmpty) { player.playLast(tracks) }
-            playButton
-            QueueActionButton(icon: "text.line.first.and.arrowtriangle.forward",
-                              disabled: tracks.isEmpty) { player.playNext(tracks) }
-        }
+        SwipeQueuePlayButton(disabled: tracks.isEmpty,
+                             onPlay: { player.play(items: tracks, from: 0) },
+                             onPlayNext: { player.playNext(tracks) },
+                             onPlayLast: { player.playLast(tracks) })
     }
 
     private var artwork: some View {
@@ -192,19 +189,4 @@ struct AlbumDetailView: View {
         .padding(.bottom, 28)
     }
 
-    private var playButton: some View {
-        Button {
-            guard !tracks.isEmpty else { return }
-            player.play(items: tracks, from: 0)
-        } label: {
-            Label("Play", systemImage: "play.fill")
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 44)
-                .padding(.vertical, 14)
-                .glassEffect(.regular.interactive(), in: Capsule())
-        }
-        .buttonStyle(.plain)
-        .disabled(tracks.isEmpty)
-    }
 }

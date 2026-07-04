@@ -14,6 +14,7 @@ struct MiniPlayer: View {
     @Environment(JellyfinClient.self) private var client
 
     @State private var width: CGFloat = 1
+    @State private var barHeight: CGFloat = 56
     @State private var scrubbing = false
     @State private var scrubStart: Double = 0
     @State private var dragProgress: Double = 0
@@ -59,7 +60,11 @@ struct MiniPlayer: View {
             }
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 12)
+        // A circle only reads as centred inside the capsule's semicircular end cap when its leading gap
+        // equals its vertical gap — (H − 40)/2 — so the 40pt CD sits concentric with the cap's arc. The
+        // old uniform 12pt pushed it visibly right. Controls keep the 12pt trailing inset.
+        .padding(.leading, max(4, (barHeight - 40) / 2))
+        .padding(.trailing, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Progress fill = the dynamic artwork gradient, toned toward the system background, revealed
         // left→right as the track plays.
@@ -76,7 +81,7 @@ struct MiniPlayer: View {
                 }
                 .allowsHitTesting(false)
         }
-        .background { GeometryReader { g in Color.clear.onChange(of: g.size.width, initial: true) { _, w in width = w } } }
+        .background { GeometryReader { g in Color.clear.onChange(of: g.size, initial: true) { _, s in width = s.width; barHeight = s.height } } }
         // The tabViewBottomAccessory supplies the Liquid Glass; we only clip our own progress fill.
         .clipShape(Capsule())
         .contentShape(Capsule())

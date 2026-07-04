@@ -527,7 +527,7 @@ struct SongRow: View {
                 let liked = client.favoriteIds.contains(song.id)
                 Task { await client.setFavorite(song.id, !liked) }
             } label: {
-                Label(client.favoriteIds.contains(song.id) ? "Remove from Liked Songs" : "Add to Liked Songs",
+                Label(client.favoriteIds.contains(song.id) ? "Unlike" : "Add to Liked Songs",
                       systemImage: client.favoriteIds.contains(song.id) ? "heart.slash" : "heart")
             }
             if let onAddToPlaylist {
@@ -599,11 +599,13 @@ struct SongRow: View {
 // MARK: - Track swipe actions (native, monochrome — full-swipe plays next)
 
 extension View {
-    /// Trailing swipe → Play Next (full-swipe) / Play Last; optional leading swipe → Remove.
+    /// Trailing swipe → Play Next (full-swipe) / Play Last; optional leading swipe → Remove
+    /// (`removeIcon` lets Liked Songs show heart.slash instead of the playlist minus).
     @ViewBuilder
     func trackSwipeActions(onPlayNext: (() -> Void)?,
                            onPlayLast: (() -> Void)?,
-                           onRemove: (() -> Void)? = nil) -> some View {
+                           onRemove: (() -> Void)? = nil,
+                           removeIcon: String = "minus.circle") -> some View {
         self
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                 if let onPlayNext {
@@ -622,36 +624,88 @@ extension View {
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                 if let onRemove {
                     Button(role: .destructive) { onRemove() } label: {
-                        Image(systemName: "minus.circle")
+                        Image(systemName: removeIcon)
                     }
                 }
             }
     }
 }
 
-// MARK: - Queue action button (round secondary action beside the Play pill)
+// MARK: - Play pill with swipe-to-queue (the ONE header control on album / playlist / liked details)
 
-struct QueueActionButton: View {
-    let icon: String
-    var disabled: Bool = false
-    let action: () -> Void
+/// Tap plays; sliding the pill queues — drag RIGHT reveals Play Next, drag LEFT reveals Play Last,
+/// committing on release past the threshold and springing back. Deliberately NOT a Button: a Button
+/// swallows the drag, so this follows the MiniPlayer paging pattern (plain view + simultaneousGesture).
+struct SwipeQueuePlayButton: View {
+    var disabled = false
+    let onPlay: () -> Void
+    let onPlayNext: () -> Void
+    let onPlayLast: () -> Void
+
+    /// The pill's live displacement while dragging; commits animate it back to 0.
+    @State private var dragX: CGFloat = 0
+    /// Set the instant a drag engages so the tap that can fire on the same touch-up is suppressed.
+    @State private var didDrag = false
     @State private var bump = false
 
+    private let threshold: CGFloat = 56
+
     var body: some View {
-        Button {
-            action()
-            bump.toggle()
-        } label: {
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .semibold))
+        ZStack {
+            // Queue hints revealed behind the pill as it slides aside.
+            HStack {
+                Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                    .opacity(dragX > 8 ? min(dragX / threshold, 1) : 0)
+                Spacer()
+                Image(systemName: "text.line.last.and.arrowtriangle.forward")
+                    .opacity(dragX < -8 ? min(-dragX / threshold, 1) : 0)
+            }
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 250)
+
+            Label("Play", systemImage: "play.fill")
+                .font(.headline)
                 .foregroundStyle(.primary)
-                .frame(width: 52, height: 52)
-                .glassEffect(.regular.interactive(), in: Circle())
+                .padding(.horizontal, 44)
+                .padding(.vertical, 14)
+                .glassEffect(.regular.interactive(), in: Capsule())
+                .contentShape(Capsule())
+                .offset(x: dragX)
+                .onTapGesture {
+                    guard !didDrag else { return }
+                    onPlay()
+                    bump.toggle()
+                }
+                .simultaneousGesture(drag)
         }
-        .buttonStyle(ScaleButtonStyle())
-        .disabled(disabled)
+        .frame(maxWidth: .infinity)
+        .allowsHitTesting(!disabled)
         .opacity(disabled ? 0.4 : 1)
         .sensoryFeedback(.impact(weight: .light), trigger: bump)
+    }
+
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { v in
+                // Horizontal only — vertical movement belongs to the List scroll.
+                guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                didDrag = true
+                let dx = v.translation.width
+                // Rubber-band past the commit point so the pill resists over-dragging.
+                dragX = abs(dx) <= threshold
+                    ? dx
+                    : (dx < 0 ? -1 : 1) * (threshold + (abs(dx) - threshold) * 0.25)
+            }
+            .onEnded { v in
+                let dx = v.translation.width
+                if didDrag, abs(dx) > abs(v.translation.height) * 1.2 {
+                    if dx > threshold { onPlayNext(); bump.toggle() }
+                    else if dx < -threshold { onPlayLast(); bump.toggle() }
+                }
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) { dragX = 0 }
+                Task { @MainActor in didDrag = false }   // clear AFTER any same-touch tap had its chance
+            }
     }
 }
 

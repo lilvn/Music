@@ -62,6 +62,9 @@ struct ReflectedCover: View {
 
     @State private var uiImage: UIImage?
     @Environment(\.libraryPush) private var push
+    /// ONE spin state shared by the upright disc and its reflection, so both render the identical
+    /// angle (two independent per-view states anchored at slightly different instants and drifted).
+    @State private var spin = DiscSpinState()
 
     /// Cover + CD composition. Tapping plays the album: the cover slides left while the spinning CD
     /// slides out from behind it. Rendered twice — upright, and mirrored as the reflection.
@@ -70,7 +73,8 @@ struct ReflectedCover: View {
             SpinningDisc(artURL: client.artworkURL(for: album, size: 400),
                          size: size * SpinningDisc.diameterRatio,
                          spinning: isCurrent && (player.isPlaying || player.isScrubbing),
-                         scrubProgress: (isCurrent && player.isScrubbing) ? player.scrubProgress : nil)
+                         scrubProgress: (isCurrent && player.isScrubbing) ? player.scrubProgress : nil,
+                         persistentSpin: spin)
                 .offset(x: isCurrent ? size * SpinningDisc.pullOutRatio : 0)
                 .opacity(isCurrent ? 1 : 0)
 
@@ -88,7 +92,8 @@ struct ReflectedCover: View {
             SpinningDisc(artURL: client.artworkURL(for: album, size: 400),
                          size: size * SpinningDisc.diameterRatio,
                          spinning: isCurrent && (player.isPlaying || player.isScrubbing),
-                         scrubProgress: (isCurrent && player.isScrubbing) ? player.scrubProgress : nil)
+                         scrubProgress: (isCurrent && player.isScrubbing) ? player.scrubProgress : nil,
+                         persistentSpin: spin)
                 .offset(x: isCurrent ? size * SpinningDisc.pullOutRatio : 0)
                 .opacity(isCurrent ? 1 : 0)
 
@@ -247,6 +252,15 @@ struct SpinningDisc: View {
 
     private func angle(at date: Date) -> Double {
         if let p = scrubProgress {
+            // Self-anchor on the FIRST scrubbed evaluation. Cover-flow discs use per-view spin state
+            // that no gesture can anchor synchronously (only the mini bar's gesture anchors .miniBar),
+            // so their first scrubbed frame — and, with the timeline paused during a stationary hold,
+            // the ENTIRE hold — rendered a stale anchor: the Featured CD's visible jump. beginScrub is
+            // idempotent (guard !isScrubbing), so the mini bar's synchronous anchor stays authoritative,
+            // and folding at the render-time `date` makes the first scrubbed angle exactly equal the
+            // disc's current free-spin angle: zero jump. (DiscSpinState is a plain non-observed class,
+            // so mutating it during render is safe — no invalidation loop.)
+            if !s.isScrubbing { s.beginScrub(progress: p, now: date) }
             return s.scrubAnchorAngle + (p - s.scrubAnchorProgress) * Self.scrubTurns
         }
         if spinning, let ref = s.ref {

@@ -299,7 +299,7 @@ struct PlaylistDetailView: View {
             }
         }
         .sheet(isPresented: $showAddMusic, onDismiss: { Task { await reload() } }) {
-            AddMusicToPlaylistSheet(playlistId: playlist.id)
+            AddMusicToPlaylistSheet(target: .playlist(playlist.id))
         }
         .sheet(item: $cropImage) { item in
             ImageCropper(image: item.image) { uploadCover($0) }
@@ -372,30 +372,12 @@ struct PlaylistDetailView: View {
         .padding(.bottom, 14)   // deliberate, consistent gap down to the first track
     }
 
-    /// Play / Shuffle / Play Next / Play Last — the 2×2 grid the artist view uses.
+    /// Just the Play pill — swiping it queues (right = Play Next, left = Play Last), same as albums.
     private var actions: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                action("Play", "play.fill") { player.play(items: tracks, from: 0) }
-                action("Shuffle", "shuffle") { player.play(items: tracks, from: 0, shuffled: true) }
-            }
-            HStack(spacing: 12) {
-                action("Play Last", "text.line.last.and.arrowtriangle.forward") { player.playLast(tracks) }
-                action("Play Next", "text.line.first.and.arrowtriangle.forward") { player.playNext(tracks) }
-            }
-        }
-    }
-
-    private func action(_ title: String, _ icon: String, _ run: @escaping () -> Void) -> some View {
-        Button(action: run) {
-            Label(title, systemImage: icon)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity).frame(height: 46)
-                .glassEffect(.regular.interactive(), in: .capsule)
-        }
-        .buttonStyle(ScaleButtonStyle())
-        .disabled(tracks.isEmpty)
+        SwipeQueuePlayButton(disabled: tracks.isEmpty,
+                             onPlay: { player.play(items: tracks, from: 0) },
+                             onPlayNext: { player.playNext(tracks) },
+                             onPlayLast: { player.playLast(tracks) })
     }
 
     private func remove(_ track: MediaItem) {
@@ -537,10 +519,12 @@ struct PlaylistPickerSheet: View {
     }
 }
 
-// MARK: - Add music to a playlist (search → tap to add)
+// MARK: - Add music to a playlist / Liked Songs (search → tap to add)
 
 struct AddMusicToPlaylistSheet: View {
-    let playlistId: String
+    /// Where an added song goes — a real playlist, or the favourites-backed Liked Songs.
+    enum Target { case playlist(String), likedSongs }
+    let target: Target
     @Environment(JellyfinClient.self) private var client
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
@@ -553,6 +537,9 @@ struct AddMusicToPlaylistSheet: View {
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
     private var songs: [MediaItem] { results.filter { $0.type == "Audio" } }
+    private var sheetTitle: String {
+        if case .likedSongs = target { "Add to Liked Songs" } else { "Add Music" }
+    }
 
     var body: some View {
         NavigationStack {
@@ -581,10 +568,12 @@ struct AddMusicToPlaylistSheet: View {
             .searchable(text: $query, prompt: "Songs")
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
-            .navigationTitle("Add Music")
+            .navigationTitle(sheetTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .task { await loadSuggestions() }
+            // Liked Songs: pre-check what's already liked so those rows show the checkmark, not "+".
+            .onAppear { if case .likedSongs = target, added.isEmpty { added = client.favoriteIds } }
             .task(id: query) {
                 let anim = Animation.easeInOut(duration: 0.22)
                 guard !trimmed.isEmpty else { withAnimation(anim) { results = []; isSearching = false }; return }
@@ -636,6 +625,11 @@ struct AddMusicToPlaylistSheet: View {
     private func add(_ song: MediaItem) {
         guard !added.contains(song.id) else { return }
         withAnimation { _ = added.insert(song.id) }
-        Task { try? await client.addToPlaylist(playlistId, itemIds: [song.id]) }
+        Task {
+            switch target {
+            case .playlist(let id): try? await client.addToPlaylist(id, itemIds: [song.id])
+            case .likedSongs:       await client.setFavorite(song.id, true)
+            }
+        }
     }
 }
