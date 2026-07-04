@@ -308,12 +308,12 @@ struct TVNowPlayingArtwork: View {
 
     var body: some View {
         ZStack {
-            // Previous / next tracks peek out behind the centre — the cover-flow context.
+            // Previous / next tracks, set well out to either side of the centre.
             if let prev = player.previousItem {
-                sideCover(prev).offset(x: -coverSize * 0.66)
+                sideCover(prev).offset(x: -coverSize * 0.95)
             }
             if let next = player.upcomingItem {
-                sideCover(next).offset(x: coverSize * 0.66)
+                sideCover(next).offset(x: coverSize * 0.95)
             }
             // Centre = the current track: reflective, CD out and spinning, choreographed on change.
             Group {
