@@ -25,6 +25,10 @@ struct TVSpinningDisc: View {
     @State private var spinStart: Date?
     /// Bumped on every start/stop so a deferred start can tell it's been superseded.
     @State private var spinEpoch = 0
+    /// Bumped on STOP: swapping the view identity destroys the animating node outright. Merely
+    /// reassigning the value under `disablesAnimations` does NOT reliably cancel a repeatForever
+    /// animation on tvOS — the presentation kept looping and then retargeted (a visible jump).
+    @State private var freezeGeneration = 0
 
     private var artURL: URL? { client.artworkURL(for: item, size: 400) }
 
@@ -34,6 +38,7 @@ struct TVSpinningDisc: View {
         // that froze outright on real hardware).
         disc
             .rotationEffect(.degrees(rotation))
+            .id(freezeGeneration)
             .onAppear { if spinning { start() } }
             .onChange(of: spinning) { _, s in s ? start() : stop() }
     }
@@ -59,11 +64,14 @@ struct TVSpinningDisc: View {
         guard let started = spinStart else { return }
         spinStart = nil
         // Freeze exactly where the disc IS: the model settled at +360, the presentation loops from
-        // the old base — rewind to base plus the elapsed spin, no animation.
+        // the old base — rewind to base plus the elapsed spin, and swap identity for a hard stop.
         let presented = rotation - 360 + Self.spinSpeed * Date().timeIntervalSince(started)
         var t = Transaction()
         t.disablesAnimations = true
-        withTransaction(t) { rotation = presented.truncatingRemainder(dividingBy: 360) }
+        withTransaction(t) {
+            rotation = presented.truncatingRemainder(dividingBy: 360)
+            freezeGeneration += 1
+        }
     }
 
     private var disc: some View {
@@ -308,7 +316,10 @@ struct TVNowPlayingArtwork: View {
                               // isn't needed there, and a track-change retract could otherwise leave it
                               // hidden (the "missing CD" in the corner).
                               discOut: docked ? true : (discOut && !nearEnd),
-                              spinning: player.isPlaying,
+                              // A matched music video owns playback — the audio Player sits silent,
+                              // so the disc turns with the VIDEO's state instead.
+                              spinning: TVVideoController.shared.matched
+                                  ? !TVVideoController.shared.directPaused : player.isPlaying,
                               showReflection: true,
                               emphasized: !docked,
                               showLabel: !docked)
@@ -404,7 +415,8 @@ private struct TVFeaturedCell: View {
             TVFlowCover(item: album,
                         size: 260,
                         discOut: isCurrent,
-                        spinning: isCurrent && player.isPlaying,
+                        spinning: isCurrent && (TVVideoController.shared.matched
+                            ? !TVVideoController.shared.directPaused : player.isPlaying),
                         showReflection: true,
                         emphasized: true)
         }
