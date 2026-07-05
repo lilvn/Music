@@ -177,6 +177,8 @@ struct TVFlowCover: View {
                         }
                     }
                     .frame(width: size * 1.15)
+                    // Lifts the text off whatever sits behind it — the reflection or a music video.
+                    .shadow(color: .black.opacity(0.65), radius: 5, y: 2)
                     .padding(.top, 26)   // let the bright seam of the reflection show above the label
                     .offset(x: discOut ? -size * 0.1 : 0)
                     .animation(.spring(response: 0.42, dampingFraction: 0.72), value: discOut)
