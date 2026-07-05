@@ -132,14 +132,19 @@ struct TVFlowCover: View {
             artworkStack
 
             if showReflection {
-                let fraction: CGFloat = 0.30
+                let fraction: CGFloat = 0.36
                 ZStack(alignment: .top) {
+                    // Strong enough to READ on the true-black background: bright at the seam,
+                    // falling off in two stops like glass on a dark table.
                     artworkStack
                         .scaleEffect(y: -1)
                         .frame(height: size * fraction, alignment: .top)
                         .mask(
-                            LinearGradient(colors: [.white.opacity(0.18), .clear],
-                                           startPoint: .top, endPoint: .bottom)
+                            LinearGradient(stops: [
+                                .init(color: .white.opacity(0.70), location: 0.0),
+                                .init(color: .white.opacity(0.28), location: 0.50),
+                                .init(color: .clear,               location: 1.0),
+                            ], startPoint: .top, endPoint: .bottom)
                                 .frame(width: size * 2.4, height: size * fraction)
                         )
                         .allowsHitTesting(false)
@@ -160,7 +165,7 @@ struct TVFlowCover: View {
                         }
                     }
                     .frame(width: size * 1.15)
-                    .padding(.top, 14)
+                    .padding(.top, 26)   // let the bright seam of the reflection show above the label
                     .offset(x: discOut ? -size * 0.1 : 0)
                     .animation(.spring(response: 0.42, dampingFraction: 0.72), value: discOut)
                     }

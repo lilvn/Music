@@ -46,6 +46,8 @@ struct TVNowPlayingView: View {
                     // below owns the remote. geometryGroup makes the dock/undock ONE fluid move.
                     let docked = inVideoMode || pane != nil
                     ZStack {
+                        // (No geometryGroup here — it froze the TimelineView-driven CD spin on
+                        // device; the spring on the frame change animates the dock well enough.)
                         TVNowPlayingArtwork(coverSize: docked ? 150 : 400,
                                             docked: docked,
                                             interactive: false)
@@ -53,7 +55,6 @@ struct TVNowPlayingView: View {
                                    alignment: docked ? .bottomLeading : .center)
                             .padding(.leading, docked ? 80 : 0)
                             .padding(.bottom, docked ? 20 : 0)
-                            .geometryGroup()
                             .animation(.spring(response: 0.55, dampingFraction: 0.85), value: docked)
 
                         if let pane {
