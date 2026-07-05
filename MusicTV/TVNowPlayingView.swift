@@ -1,4 +1,5 @@
 import SwiftUI
+import GameController
 
 /// Now Playing for the TV — ours again, built around two pieces:
 ///
@@ -109,6 +110,9 @@ struct TVNowPlayingView: View {
         }
         .onChange(of: pane) { _, _ in bumpBar() }
         .onChange(of: player.isPlaying) { _, _ in bumpBar() }
+        // The owned video's pause state is the play state while a video owns playback — resuming
+        // must restart the idle countdown just like the audio player's flip does.
+        .onChange(of: videoCtl.directPaused) { _, _ in bumpBar() }
         // The remote catcher exists ONLY while the chrome is hidden or a direct video plays.
         // It must never sit on the page container itself: a move-command handler on an ANCESTOR
         // of the focused button intercepts every swipe, making the transport unnavigable.
@@ -172,6 +176,10 @@ struct TVNowPlayingView: View {
         barIdle = Task {
             try? await Task.sleep(for: .seconds(6))
             guard !Task.isCancelled, pane == nil else { return }
+            // Idle-hide is for WATCHING/LISTENING — while paused the user is mid-interaction,
+            // so the chrome stays up (resuming restarts the countdown via the play-state bump).
+            let playing = videoCtl.ownsPlayback ? !videoCtl.directPaused : player.isPlaying
+            guard playing else { return }
             barVisible = false
         }
     }
@@ -225,6 +233,8 @@ struct TVPlaybackBar: View {
 
     /// True while hold-click scrub mode is engaged (the bar enlarges; left/right scrubs).
     @State private var scrubbing = false
+    /// Watches the Siri Remote's clickpad press state for the hold that engages scrub mode.
+    @State private var selectHold = TVSelectHold()
 
     var body: some View {
         let direct = videoCtl.direct
@@ -318,6 +328,18 @@ struct TVPlaybackBar: View {
         .onChange(of: focus.wrappedValue) { _, f in
             if scrubbing, f != .scrub { scrubbing = false }   // focus escaped some other way
         }
+        // HOLD the click (select) while any bar control is focused → scrub mode. Via GameController:
+        // the focused tvOS Button consumes select presses outright, so neither SwiftUI's
+        // LongPressGesture nor a window-level UIKit recognizer ever sees them — the Siri Remote's
+        // clickpad press state from GCMicroGamepad is the only reliable hold signal.
+        .onAppear {
+            selectHold.onHold = {
+                guard focus.wrappedValue != nil, !scrubbing else { return }
+                enterScrub()
+            }
+            selectHold.start()
+        }
+        .onDisappear { selectHold.stop() }
     }
 
     private func enterScrub() {
@@ -354,9 +376,6 @@ struct TVPlaybackBar: View {
         }
         .buttonStyle(.tvBare)
         .focused(focus, equals: id)
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.5).onEnded { _ in enterScrub() }
-        )
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: focused)
     }
 }
@@ -457,6 +476,64 @@ struct TVCompactNowPlaying: View {
             }
             .clipShape(Capsule())
             .glassEffect(.regular, in: .capsule)
+        }
+    }
+}
+
+/// Watches the Siri Remote's clickpad (buttonA) press state via GameController and fires `onHold`
+/// when it stays pressed for `holdDuration`. The focused tvOS Button consumes select presses, so
+/// this is the only reliable way to detect a press-and-HOLD of the click without stealing the click
+/// itself — the button's normal action still fires on release (callers guard it with `scrubbing`).
+@MainActor
+final class TVSelectHold {
+    var onHold: (() -> Void)?
+
+    private let holdDuration: Duration = .milliseconds(500)
+    private var holdTimer: Task<Void, Never>?
+    private var connectObserver: NSObjectProtocol?
+    private var hooked: [ObjectIdentifier] = []
+
+    func start() {
+        GCController.controllers().forEach(hook)
+        guard connectObserver == nil else { return }
+        connectObserver = NotificationCenter.default.addObserver(
+            forName: .GCControllerDidConnect, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let controller = note.object as? GCController else { return }
+            Task { @MainActor in self?.hook(controller) }
+        }
+    }
+
+    func stop() {
+        holdTimer?.cancel()
+        holdTimer = nil
+        if let connectObserver { NotificationCenter.default.removeObserver(connectObserver) }
+        connectObserver = nil
+        for controller in GCController.controllers() {
+            controller.microGamepad?.buttonA.pressedChangedHandler = nil
+        }
+        hooked = []
+        onHold = nil
+    }
+
+    private func hook(_ controller: GCController) {
+        guard let pad = controller.microGamepad else { return }
+        let id = ObjectIdentifier(controller)
+        guard !hooked.contains(id) else { return }
+        hooked.append(id)
+        pad.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in
+            Task { @MainActor in self?.pressChanged(pressed) }
+        }
+    }
+
+    private func pressChanged(_ pressed: Bool) {
+        holdTimer?.cancel()
+        holdTimer = nil
+        guard pressed else { return }
+        holdTimer = Task { @MainActor in
+            try? await Task.sleep(for: holdDuration)
+            guard !Task.isCancelled else { return }
+            self.onHold?()
         }
     }
 }

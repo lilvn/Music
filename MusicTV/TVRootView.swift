@@ -47,7 +47,7 @@ struct TVRootView: View {
         // HOLD the Menu button anywhere → Transfer Here (same rules as the button: another device is
         // playing, we're not, and it's not a video-only session). Jumps to Now Playing when it lands.
         .background {
-            TVMenuHoldTransfer {
+            TVHoldPress(.menu, duration: 0.7) {
                 let hub = SessionHub.shared
                 guard let remote = hub.remote, !hub.transferring,
                       !player.isPlaying, remote.item.type != "MusicVideo" else { return }
@@ -335,18 +335,27 @@ struct TVGradientTile: View {
 /// Installs a window-level long-press recognizer for the Siri Remote's MENU button: holding it down
 /// anywhere in the app pulls the remote session onto this TV ("Transfer Here") — the couch shortcut
 /// for the button on the remote-mirror page. A short Menu press keeps its normal back behavior.
-struct TVMenuHoldTransfer: UIViewRepresentable {
+struct TVHoldPress: UIViewRepresentable {
+    let press: UIPress.PressType
+    let duration: Double
     let action: () -> Void
+
+    init(_ press: UIPress.PressType, duration: Double, action: @escaping () -> Void) {
+        self.press = press
+        self.duration = duration
+        self.action = action
+    }
 
     func makeUIView(context: Context) -> InstallerView {
         let v = InstallerView()
         v.isUserInteractionEnabled = false
+        let press = press, duration = duration
         v.onWindow = { window in
             guard context.coordinator.recognizer == nil else { return }
             let r = UILongPressGestureRecognizer(target: context.coordinator,
                                                  action: #selector(Coordinator.fire(_:)))
-            r.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
-            r.minimumPressDuration = 0.7
+            r.allowedPressTypes = [NSNumber(value: press.rawValue)]
+            r.minimumPressDuration = duration
             window.addGestureRecognizer(r)
             context.coordinator.recognizer = r
         }
