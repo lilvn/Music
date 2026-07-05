@@ -77,14 +77,12 @@ struct TVNowPlayingView: View {
         .onDisappear { pane = nil }   // leaving the tab closes any open pane
         .background {
             ZStack {
+                // System theme like the browse pages — the only non-system background here is a
+                // playing music video. (Detail views keep their artwork wash.)
                 if inVideoMode, let av = videoCtl.avPlayer {
                     TVVideoLayer(player: av).ignoresSafeArea().transition(.opacity)
-                } else {
-                    // The artwork blurred into a colour wash — Now Playing and the detail views are
-                    // the only artwork-tinted pages; browse pages stay system-theme.
-                    TVBackdrop(item: player.currentItem ?? SessionHub.shared.remote?.item)
                 }
-                // A pane needs contrast over whatever's behind (especially a playing video).
+                // A pane needs contrast over a playing video.
                 if pane != nil {
                     Color.black.opacity(0.45).ignoresSafeArea().allowsHitTesting(false)
                 }

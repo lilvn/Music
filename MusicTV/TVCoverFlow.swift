@@ -338,3 +338,61 @@ struct TVNowPlayingArtwork: View {
         }
     }
 }
+
+// MARK: - The Featured carousel (Home)
+
+/// The iPhone's Featured section on the TV: a skeuomorphic cover-flow shelf. Each album is a
+/// reflective cover; the one that's PLAYING slides its spinning CD out. Click plays the album —
+/// click it again (while current) to open its detail.
+struct TVFeaturedCarousel: View {
+    let items: [MediaItem]
+    /// Called with the album and whether it's already the playing one.
+    let onTap: (MediaItem, Bool) -> Void
+    @Environment(Player.self) private var player
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Featured").font(.title3).fontWeight(.semibold)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 56) {
+                    ForEach(items) { album in
+                        TVFeaturedCell(album: album) {
+                            onTap(album, player.currentItem?.albumId == album.id)
+                        }
+                    }
+                }
+                .padding(.vertical, 24)      // room for the focus lift
+                .padding(.trailing, 100)     // room for the slid-out disc on the last cover
+            }
+            .scrollClipDisabled()
+        }
+    }
+}
+
+private struct TVFeaturedCell: View {
+    @Environment(Player.self) private var player
+    let album: MediaItem
+    let action: () -> Void
+    @FocusState private var focused: Bool
+
+    private var isCurrent: Bool { player.currentItem?.albumId == album.id }
+
+    var body: some View {
+        Button(action: action) {
+            TVFlowCover(item: album,
+                        size: 260,
+                        discOut: isCurrent,
+                        spinning: isCurrent && player.isPlaying,
+                        showReflection: true,
+                        emphasized: true)
+        }
+        .buttonStyle(.tvBare)   // no white platter — the lift below is the focus cue
+        .focused($focused)
+        .scaleEffect(focused ? 1.06 : 1.0)
+        .shadow(color: .black.opacity(focused ? 0.4 : 0), radius: focused ? 20 : 0, y: focused ? 12 : 0)
+        .animation(.easeOut(duration: 0.18), value: focused)
+        // The slid-out CD needs breathing room so it doesn't sit under the next cover.
+        .padding(.trailing, isCurrent ? 260 * TVSpinningDisc.pullOutRatio : 0)
+        .animation(.spring(response: 0.5, dampingFraction: 0.8), value: isCurrent)
+    }
+}

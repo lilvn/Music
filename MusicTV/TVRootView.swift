@@ -26,6 +26,18 @@ struct TVRootView: View {
             let v = TVVideoController.shared
             v.direct ? v.togglePlayPause() : player.togglePlayPause()
         }
+        // HOLD the Menu button anywhere → Transfer Here (same rules as the button: another device is
+        // playing, we're not, and it's not a video-only session). Jumps to Now Playing when it lands.
+        .background {
+            TVMenuHoldTransfer {
+                let hub = SessionHub.shared
+                guard let remote = hub.remote, !hub.transferring,
+                      !player.isPlaying, remote.item.type != "MusicVideo" else { return }
+                hub.transferHere()
+                tab = .nowPlaying
+            }
+            .frame(width: 0, height: 0)
+        }
     }
 }
 
@@ -49,7 +61,18 @@ struct TVHomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if !featured.isEmpty {
-                        TVShelf(title: "Featured", items: featured) { route = .album($0) }
+                        // The iPhone's Featured section: skeuomorphic covers, the playing album's CD
+                        // slid out and spinning. Click plays; click the current one to open it.
+                        TVFeaturedCarousel(items: featured) { album, isCurrent in
+                            if isCurrent {
+                                route = .album(album)
+                            } else {
+                                Task {
+                                    let tracks = (try? await client.fetchAlbumTracks(albumId: album.id)) ?? []
+                                    if !tracks.isEmpty { player.play(items: tracks, from: 0) }
+                                }
+                            }
+                        }
                     }
                     if !recentlyAdded.isEmpty {
                         TVShelf(title: "New Releases", items: recentlyAdded) { route = .album($0) }
@@ -285,6 +308,59 @@ struct TVGradientTile: View {
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 4)
+        }
+    }
+}
+
+// MARK: - Hold Menu → Transfer Here
+
+/// Installs a window-level long-press recognizer for the Siri Remote's MENU button: holding it down
+/// anywhere in the app pulls the remote session onto this TV ("Transfer Here") — the couch shortcut
+/// for the button on the remote-mirror page. A short Menu press keeps its normal back behavior.
+struct TVMenuHoldTransfer: UIViewRepresentable {
+    let action: () -> Void
+
+    func makeUIView(context: Context) -> InstallerView {
+        let v = InstallerView()
+        v.isUserInteractionEnabled = false
+        v.onWindow = { window in
+            guard context.coordinator.recognizer == nil else { return }
+            let r = UILongPressGestureRecognizer(target: context.coordinator,
+                                                 action: #selector(Coordinator.fire(_:)))
+            r.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
+            r.minimumPressDuration = 0.7
+            window.addGestureRecognizer(r)
+            context.coordinator.recognizer = r
+        }
+        return v
+    }
+
+    func updateUIView(_ uiView: InstallerView, context: Context) {
+        context.coordinator.action = action
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+    static func dismantleUIView(_ uiView: InstallerView, coordinator: Coordinator) {
+        if let r = coordinator.recognizer { r.view?.removeGestureRecognizer(r) }
+        coordinator.recognizer = nil
+    }
+
+    final class Coordinator: NSObject {
+        var action: () -> Void
+        var recognizer: UILongPressGestureRecognizer?
+        init(action: @escaping () -> Void) { self.action = action }
+        @objc func fire(_ r: UILongPressGestureRecognizer) {
+            if r.state == .began { action() }
+        }
+    }
+
+    /// A zero-size helper that hands us the window the moment it joins one.
+    final class InstallerView: UIView {
+        var onWindow: ((UIWindow) -> Void)?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let window { onWindow?(window) }
         }
     }
 }
