@@ -166,12 +166,32 @@ struct TVPlaybackBar: View {
                 }
             }
 
-            // The playhead: elapsed · fill-as-progress · total. Focus it to scrub.
+            // The playhead: elapsed · scrub track · total. Focus it to scrub.
             playhead(direct: direct, item: item)
                 .padding(.leading, 14)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
+        // The iOS mini bar's progress, uniform across platforms: the artwork gradient fills the WHOLE
+        // bar left→right as the track plays.
+        .background(alignment: .leading) {
+            if let item {
+                GeometryReader { g in
+                    let frac: Double = direct
+                        ? videoCtl.directProgress
+                        : (player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0)
+                    TVBarFill(item: item)
+                        .frame(width: g.size.width, height: g.size.height)
+                        .clipped()
+                        .mask(alignment: .leading) {
+                            Rectangle().frame(width: max(0, g.size.width * frac), height: g.size.height)
+                        }
+                        .animation(.linear(duration: 0.5), value: frac)
+                }
+                .allowsHitTesting(false)
+            }
+        }
+        .clipShape(Capsule())
         .glassEffect(.regular, in: .capsule)
     }
 
@@ -201,30 +221,19 @@ struct TVPlaybackBar: View {
                 .font(.caption2).monospacedDigit()
                 .foregroundStyle(scrubbing ? .primary : .secondary)
 
+            // A plain scrub track — the GRADIENT FILL across the whole bar is the progress display
+            // (uniform with the iOS mini bar); this thin line is just the scrubbing affordance.
             GeometryReader { g in
                 let frac: Double = direct
                     ? videoCtl.directProgress
                     : (player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0)
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.18))
-                    // The artwork wash IS the progress — the app's signature fill. Hard-clipped to
-                    // the bar's own frame (an unconstrained aspect-fill image bleeds a tall stripe).
-                    if let item {
-                        TVArtworkProgressFill(item: item)
-                            .frame(width: g.size.width, height: g.size.height)
-                            .clipped()
-                            .mask(alignment: .leading) {
-                                Capsule().frame(width: max(6, g.size.width * frac),
-                                                height: g.size.height)
-                            }
-                    } else {
-                        Capsule().fill(.white.opacity(0.8))
-                            .frame(width: max(6, g.size.width * frac))
-                    }
+                    Capsule().fill(.white.opacity(scrubbing ? 1.0 : 0.65))
+                        .frame(width: max(6, g.size.width * frac))
                 }
-                .clipShape(Capsule())
             }
-            .frame(width: 380, height: scrubbing ? 12 : 7)
+            .frame(width: 380, height: scrubbing ? 12 : 6)
             .animation(.easeOut(duration: 0.15), value: scrubbing)
 
             Text((direct ? videoDur : player.duration).formattedDuration)
@@ -245,15 +254,16 @@ struct TVPlaybackBar: View {
     }
 }
 
-/// A blurred wash of the artwork for the playhead fill.
-struct TVArtworkProgressFill: View {
+/// The artwork blurred into a colour wash — the bar's progress fill, toned exactly like the iOS
+/// mini bar's ArtworkGradient so the two read as the same surface.
+struct TVBarFill: View {
     @Environment(JellyfinClient.self) private var client
     let item: MediaItem
     var body: some View {
-        LibraryImage(url: client.artworkURL(for: item, size: 160), maxPixel: 160) { Color(white: 0.6) }
+        LibraryImage(url: client.artworkURL(for: item, size: 160), maxPixel: 160) { Color(white: 0.2) }
             .aspectRatio(contentMode: .fill)
-            .blur(radius: 16, opaque: true)
-            .saturation(1.5)
-            .brightness(0.15)   // reads as the LIT part of the track
+            .blur(radius: 24, opaque: true)
+            .saturation(1.4)
+            .overlay(Color.black.opacity(0.28))   // keep the white controls/text legible over it
     }
 }
