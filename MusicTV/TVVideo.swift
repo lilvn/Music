@@ -94,7 +94,42 @@ final class TVVideoController {
         guard let url = client.videoStreamURL(for: video) else { clearBackdrop(); return }
         makePlayer(url: url, muted: true, loops: true)       // muted — the album track is the audio
         activeVideo = video
+        // The picture follows the SONG's clock from the first frame (opening mid-track and all).
+        syncBackdropToAudio(force: true)
         if playing { avPlayer?.playImmediately(atRate: 1) }
+    }
+
+    /// The audio playhead moved by a seek/scrub — snap the backdrop to it immediately.
+    func audioDidSeek(to seconds: Double) {
+        guard !direct, activeVideo != nil else { return }
+        seekBackdrop(to: seconds)
+    }
+
+    /// Keep the muted backdrop ON the audio's clock. `force` seeks unconditionally (fresh attach);
+    /// otherwise only when drifted noticeably (called from the 0.5s tick).
+    fileprivate func syncBackdropToAudio(force: Bool = false) {
+        guard !direct, let avPlayer, activeVideo != nil else { return }
+        let audioTime = Player.shared.currentTime
+        let videoTime = avPlayer.currentTime().seconds
+        let target = backdropTarget(for: audioTime)
+        if force || abs(videoTime - target) > 1.0 {
+            seekBackdrop(to: audioTime)
+        }
+    }
+
+    private func seekBackdrop(to audioSeconds: Double) {
+        guard let avPlayer else { return }
+        let t = backdropTarget(for: audioSeconds)
+        avPlayer.seek(to: CMTime(seconds: t, preferredTimescale: 600),
+                      toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    /// Where the video should be for a given audio position — wrapped when the clip is shorter than
+    /// the song (the backdrop loops).
+    private func backdropTarget(for audioSeconds: Double) -> Double {
+        let dur = avPlayer?.currentItem?.duration.seconds ?? 0
+        guard dur.isFinite, dur > 1 else { return audioSeconds }
+        return audioSeconds.truncatingRemainder(dividingBy: dur)
     }
 
     private func clearBackdrop() {
@@ -204,6 +239,9 @@ final class TVVideoController {
         ) { [weak self, weak av] t in
             guard let self, let d = av?.currentItem?.duration.seconds, d.isFinite, d > 0 else { return }
             self.directProgress = min(max(t.seconds / d, 0), 1)
+            // A matched backdrop stays ON the audio's clock — continuous drift correction (covers
+            // buffering stalls, loops, and anything the seek hook missed).
+            if !self.direct, Player.shared.isPlaying { self.syncBackdropToAudio() }
             // Report direct-video progress every ~5s (matching the audio Player's cadence) so other
             // devices' session polls see a moving playhead.
             if self.direct, let id = self.reportedVideoId {

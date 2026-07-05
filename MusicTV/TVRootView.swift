@@ -24,6 +24,17 @@ struct TVRootView: View {
                 Color.black.ignoresSafeArea()
             }
         }
+        // While browsing, the playback bar compresses into the bottom-left corner (CD + title +
+        // gradient progress); it expands back into the full transport on the Now Playing tab.
+        .overlay(alignment: .bottomLeading) {
+            if tab != .nowPlaying {
+                TVCompactNowPlaying()
+                    .padding(.leading, 60)
+                    .padding(.bottom, 40)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
         // Starting playback anywhere jumps straight to Now Playing.
         .environment(\.tvOpenNowPlaying) { tab = .nowPlaying }
         // The Siri Remote play/pause button toggles playback from ANY tab / focus — including a track

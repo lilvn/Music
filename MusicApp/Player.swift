@@ -218,6 +218,10 @@ final class Player {
         seekSuppressUntil = Date().addingTimeInterval(0.5)
         updateNowPlayingElapsed()
         saveSession()
+#if os(tvOS)
+        // A matched music-video backdrop follows the song's clock — snap it to the new position.
+        TVVideoController.shared.audioDidSeek(to: clamped)
+#endif
     }
 
     func nextTrack() {

@@ -210,6 +210,9 @@ struct TVNowPlayingArtwork: View {
     /// Swiping DOWN hands focus to the transport controls below (Now Playing supplies this); nil →
     /// down releases focus like up does.
     var onFocusControls: (() -> Void)? = nil
+    /// False → pure visual: never joins the focus graph (Now Playing uses the transport bar for all
+    /// input, so focus travels nav bar → bar directly instead of stopping on the artwork).
+    var interactive = true
     @FocusState private var focused: Bool
 
     // ---- Track-change choreography -------------------------------------------------------------
@@ -244,7 +247,7 @@ struct TVNowPlayingArtwork: View {
         .animation(.easeInOut(duration: 0.32), value: player.queue.currentIndex)
         .frame(maxWidth: .infinity, alignment: docked ? .leading : .center)
         .contentShape(Rectangle())
-        .focusable()
+        .focusable(interactive)
         .focused($focused)
         .scaleEffect(focused ? 1.02 : 1.0)   // breathes subtly when the remote is on it
         .onMoveCommand { direction in
