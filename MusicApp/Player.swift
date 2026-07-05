@@ -1,9 +1,6 @@
 import Foundation
 import AVFoundation
 import Observation
-#if os(tvOS)
-import AVKit   // AVPlayerItem.externalMetadata (the native player's audio Now-Playing UI)
-#endif
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -614,27 +611,7 @@ final class Player {
         // (automatic) buffering so they're pre-rolled and ready for a gapless hand-off.
         if immediate { item.preferredForwardBufferDuration = 1 }
         audioMonitor.installTap(on: item)   // meter this item's audio for the reactive waveform
-#if os(tvOS)
-        // Identify the item as AUDIO content to the native player (tvOS AVPlayerViewController
-        // needs this to render its audio Now-Playing UI instead of waiting forever for video frames).
-        item.externalMetadata = Self.externalMetadata(for: track)
-#endif
         return item
-    }
-
-    /// Title / artist / album as AVMetadata for AVPlayerViewController's transport + info panel.
-    private static func externalMetadata(for track: MediaItem) -> [AVMetadataItem] {
-        func meta(_ id: AVMetadataIdentifier, _ value: String) -> AVMetadataItem {
-            let m = AVMutableMetadataItem()
-            m.identifier = id
-            m.value = value as NSString
-            m.extendedLanguageTag = "und"
-            return m
-        }
-        var items = [meta(.commonIdentifierTitle, track.name),
-                     meta(.commonIdentifierArtist, track.primaryArtist)]
-        if let album = track.album { items.append(meta(.commonIdentifierAlbumName, album)) }
-        return items
     }
 
     /// Tear down any existing player and build a fresh queue window starting at `index`.
