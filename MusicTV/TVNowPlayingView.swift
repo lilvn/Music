@@ -80,12 +80,18 @@ struct TVNowPlayingView: View {
             if (player.currentItem != nil || videoCtl.direct), barVisible {
                 TVPlaybackBar(pane: $pane, focus: $barFocus)
                     .padding(.bottom, 36)
+                    // Full-width focus section: ANY downward swipe from the nav bar lands in the
+                    // transport, no matter where the buttons sit horizontally.
+                    .frame(maxWidth: .infinity)
+                    .focusSection()
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.35), value: barVisible)
+        // The nav bar rests and wakes WITH the playback bar — idle hides all chrome at once.
+        .toolbar(barVisible ? .automatic : .hidden, for: .tabBar)
         .onDisappear { pane = nil; barIdle?.cancel() }   // leaving the tab closes any open pane
-        .onAppear(perform: bumpBar)
+        .onAppear { bumpBar() }
         // HIGHLIGHTING Lyrics/Up Next opens the pane (no click); landing back on the transport
         // closes it. Any focus movement counts as interaction.
         .onChange(of: barFocus) { _, f in
@@ -103,15 +109,18 @@ struct TVNowPlayingView: View {
         // any swipe brings the bar back / skips direct videos; click brings it back too.
         .focusable(videoCtl.direct || !barVisible)
         .onMoveCommand { direction in
-            guard barVisible else { bumpBar(); return }
+            guard barVisible else { bumpBar(focusTransport: true); return }
             guard videoCtl.direct else { return }
             switch direction {
             case .left:  videoCtl.skipDirect(-1, client: client, audio: player)
             case .right: videoCtl.skipDirect(+1, client: client, audio: player)
+            // The catcher consumes every move while it has focus — hand vertical swipes
+            // to the transport so the bar is actually reachable during a direct video.
+            case .down, .up: barFocus = .play
             default: break
             }
         }
-        .onTapGesture { if !barVisible { bumpBar() } }
+        .onTapGesture { if !barVisible { bumpBar(focusTransport: true) } }
         .background {
             ZStack {
                 // System theme like the browse pages — the only non-system background here is a
@@ -131,8 +140,17 @@ struct TVNowPlayingView: View {
 
     /// Show the bar and restart the idle countdown (never hides while a pane is open — its buttons
     /// are the way out).
-    private func bumpBar() {
+    private func bumpBar(focusTransport: Bool = false) {
+        let wasHidden = !barVisible
         barVisible = true
+        // Waking from idle: the catcher held focus and is about to stop being focusable, which
+        // ejects focus somewhere arbitrary — land it ON the transport once the bar is inserted.
+        if focusTransport, wasHidden {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(150))
+                if barFocus == nil { barFocus = .play }
+            }
+        }
         barIdle?.cancel()
         barIdle = Task {
             try? await Task.sleep(for: .seconds(6))
