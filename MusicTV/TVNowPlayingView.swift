@@ -7,9 +7,9 @@ import SwiftUI
 /// (with the tuck-in choreography), click toggles play/pause. With a matched music video it docks
 /// bottom-left over the video; with a pane (Lyrics / Up Next) open it docks the same way.
 ///
-/// **The playback bar:** a Liquid Glass mini bar along the bottom — previous / play-pause / next,
-/// Lyrics + Up Next toggles, and the playhead whose artwork-wash fill IS the progress. Scrubbing
-/// happens ONLY there: focus the playhead, then swipe left/right to scrub.
+/// **The playback bar:** a Liquid Glass mini bar along the bottom — Lyrics | prev/play/next | Up
+/// Next, with the artwork gradient filling the capsule AS the progress. HOLD the click on the bar to
+/// scrub (it enlarges; left/right drags the playhead; click drops it back down).
 struct TVNowPlayingView: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
@@ -126,9 +126,10 @@ struct TVNowPlayingView: View {
 
 // MARK: - The playback bar (the mini bar, grown into the page's transport)
 
-/// A Liquid Glass capsule bottom-center: previous / play-pause / next, Lyrics + Up Next toggles, and
-/// the playhead — a wide capsule whose artwork-wash fill IS the progress. Focus the playhead and
-/// swipe left/right to scrub (±5s per pan tick); everywhere else on the page, left/right skips songs.
+/// A Liquid Glass capsule bottom-center: Lyrics on the left edge, Up Next on the right, the transport
+/// centered between them — and NO separate progress bar: the artwork gradient filling the capsule IS
+/// the progress. HOLD the click anywhere on the bar to enter scrub mode (it enlarges, left/right
+/// drags the playhead, times surface at the ends); click again to drop it back down.
 struct TVPlaybackBar: View {
     @Binding var pane: TVNowPlayingView.Pane?
     var focus: FocusState<TVNowPlayingView.BarCtl?>.Binding
@@ -136,44 +137,68 @@ struct TVPlaybackBar: View {
     @Environment(JellyfinClient.self) private var client
     @Environment(Player.self) private var player
     private var videoCtl: TVVideoController { TVVideoController.shared }
-    private var scrubbing: Bool { focus.wrappedValue == .scrub }
+
+    /// True while hold-click scrub mode is engaged (the bar enlarges; left/right scrubs).
+    @State private var scrubbing = false
 
     var body: some View {
         let direct = videoCtl.direct
         let playing = direct ? !videoCtl.directPaused : player.isPlaying
         let item = direct ? videoCtl.activeVideo : player.currentItem
 
-        HStack(spacing: 14) {
-            controlButton(.prev, "backward.fill") {
-                if direct { videoCtl.skipDirect(-1, client: client, audio: player) }
-                else { player.previousTrack() }
-            }
-            controlButton(.play, playing ? "pause.fill" : "play.fill") {
-                direct ? videoCtl.togglePlayPause() : player.togglePlayPause()
-            }
-            controlButton(.next, "forward.fill") {
-                if direct { videoCtl.skipDirect(+1, client: client, audio: player) }
-                else { player.nextTrack() }
-            }
-
-            if !direct {
-                controlButton(.lyrics, pane == .lyrics ? "quote.bubble.fill" : "quote.bubble") {
-                    pane = (pane == .lyrics) ? nil : .lyrics
+        ZStack {
+            // Lyrics on the LEFT edge, Queue on the RIGHT, transport CENTERED between them.
+            HStack {
+                if !direct {
+                    controlButton(.lyrics, pane == .lyrics ? "quote.bubble.fill" : "quote.bubble") {
+                        pane = (pane == .lyrics) ? nil : .lyrics
+                    }
                 }
-                .padding(.leading, 10)
-                controlButton(.queue, "list.triangle") {
-                    pane = (pane == .queue) ? nil : .queue
+
+                Spacer(minLength: 0)
+
+                HStack(spacing: 16) {
+                    controlButton(.prev, "backward.fill") {
+                        if direct { videoCtl.skipDirect(-1, client: client, audio: player) }
+                        else { player.previousTrack() }
+                    }
+                    controlButton(.play, playing ? "pause.fill" : "play.fill") {
+                        direct ? videoCtl.togglePlayPause() : player.togglePlayPause()
+                    }
+                    controlButton(.next, "forward.fill") {
+                        if direct { videoCtl.skipDirect(+1, client: client, audio: player) }
+                        else { player.nextTrack() }
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                if !direct {
+                    controlButton(.queue, "list.triangle") {
+                        pane = (pane == .queue) ? nil : .queue
+                    }
                 }
             }
+            .opacity(scrubbing ? 0.25 : 1)   // the bar itself becomes the scrubber
 
-            // The playhead: elapsed · scrub track · total. Focus it to scrub.
-            playhead(direct: direct, item: item)
-                .padding(.leading, 14)
+            // Scrub mode: the times surface at the bar's ends while the fill is being dragged.
+            if scrubbing {
+                HStack {
+                    Text(player.currentTime.formattedDuration)
+                    Spacer()
+                    Text(player.duration.formattedDuration)
+                }
+                .font(.caption).monospacedDigit().fontWeight(.semibold)
+                .padding(.horizontal, 8)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
         }
+        .frame(width: 620)
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        // The iOS mini bar's progress, uniform across platforms: the artwork gradient fills the WHOLE
-        // bar left→right as the track plays.
+        // NO separate progress bar: the iOS mini bar's language — the artwork gradient fills the
+        // WHOLE bar left→right as the track plays (and is what you drag in scrub mode).
         .background(alignment: .leading) {
             if let item {
                 GeometryReader { g in
@@ -193,12 +218,55 @@ struct TVPlaybackBar: View {
         }
         .clipShape(Capsule())
         .glassEffect(.regular, in: .capsule)
+        // Scrub-mode catcher: exists only while scrubbing, covers the whole bar — every left/right
+        // pan tick drags the playhead; CLICK (or up/down) drops it back down to the controls.
+        .overlay {
+            if scrubbing {
+                Color.clear
+                    .contentShape(Capsule())
+                    .focusable(true)
+                    .focused(focus, equals: .scrub)
+                    .onMoveCommand { dir in
+                        switch dir {
+                        case .left:  player.seek(to: max(0, player.currentTime - 5))
+                        case .right: player.seek(to: min(player.duration, player.currentTime + 5))
+                        case .up, .down: exitScrub()
+                        @unknown default: break
+                        }
+                    }
+                    .onTapGesture { exitScrub() }
+                    .onExitCommand { exitScrub() }
+            }
+        }
+        .scaleEffect(scrubbing ? 1.12 : 1.0)   // HOLD-click anywhere on the bar → it grows to scrub
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: scrubbing)
+        .onChange(of: focus.wrappedValue) { _, f in
+            if scrubbing, f != .scrub { scrubbing = false }   // focus escaped some other way
+        }
+    }
+
+    private func enterScrub() {
+        guard !videoCtl.direct, player.duration > 0 else { return }
+        scrubbing = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(60))   // let the catcher join the hierarchy
+            focus.wrappedValue = .scrub
+        }
+    }
+
+    private func exitScrub() {
+        scrubbing = false
+        focus.wrappedValue = .play
     }
 
     /// One round transport control: white circle + black glyph when focused, quiet wash otherwise.
+    /// HOLDING the click on any of them engages scrub mode (the release is swallowed by the guard).
     private func controlButton(_ id: TVNowPlayingView.BarCtl, _ icon: String,
                                action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            guard !scrubbing else { return }   // the click-up that ends a hold isn't a press
+            action()
+        } label: {
             Image(systemName: icon)
                 .font(.body.weight(.semibold))
                 .foregroundStyle(focus.wrappedValue == id ? AnyShapeStyle(.black) : AnyShapeStyle(.primary))
@@ -209,48 +277,10 @@ struct TVPlaybackBar: View {
         }
         .buttonStyle(.tvBare)
         .focused(focus, equals: id)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.5).onEnded { _ in enterScrub() }
+        )
         .animation(.easeOut(duration: 0.12), value: focus.wrappedValue)
-    }
-
-    /// The scrub surface. Left/right seeks ONLY while this is focused (the page's left/right skips).
-    @ViewBuilder
-    private func playhead(direct: Bool, item: MediaItem?) -> some View {
-        let videoDur = videoCtl.activeVideo?.durationSeconds ?? 0
-        HStack(spacing: 12) {
-            Text((direct ? videoCtl.directProgress * videoDur : player.currentTime).formattedDuration)
-                .font(.caption2).monospacedDigit()
-                .foregroundStyle(scrubbing ? .primary : .secondary)
-
-            // A plain scrub track — the GRADIENT FILL across the whole bar is the progress display
-            // (uniform with the iOS mini bar); this thin line is just the scrubbing affordance.
-            GeometryReader { g in
-                let frac: Double = direct
-                    ? videoCtl.directProgress
-                    : (player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0)
-                ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.18))
-                    Capsule().fill(.white.opacity(scrubbing ? 1.0 : 0.65))
-                        .frame(width: max(6, g.size.width * frac))
-                }
-            }
-            .frame(width: 380, height: scrubbing ? 12 : 6)
-            .animation(.easeOut(duration: 0.15), value: scrubbing)
-
-            Text((direct ? videoDur : player.duration).formattedDuration)
-                .font(.caption2).monospacedDigit().foregroundStyle(.secondary)
-        }
-        .contentShape(Rectangle())
-        .focusable(!direct)   // the direct video's progress is display-only
-        .focused(focus, equals: .scrub)
-        .onMoveCommand { dir in
-            switch dir {
-            case .left:  player.seek(to: max(0, player.currentTime - 5))
-            case .right: player.seek(to: min(player.duration, player.currentTime + 5))
-            case .up, .down: focus.wrappedValue = .play   // onMoveCommand consumes ALL moves — route out
-            @unknown default: break
-            }
-        }
-        .onTapGesture { focus.wrappedValue = .play }
     }
 }
 

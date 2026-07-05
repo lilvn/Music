@@ -7,6 +7,7 @@ enum TVTab: Hashable { case home, albums, playlists, nowPlaying, search }
 /// inside it); no mini bar.
 struct TVRootView: View {
     @Environment(Player.self) private var player
+    @Environment(\.colorScheme) private var colorScheme
     @State private var tab: TVTab = .home
 
     var body: some View {
@@ -16,6 +17,12 @@ struct TVRootView: View {
             Tab("Playlists", systemImage: "music.note.list", value: TVTab.playlists) { TVPlaylistsView() }
             Tab("Now Playing", systemImage: "waveform", value: TVTab.nowPlaying) { TVNowPlayingView() }
             Tab("Search", systemImage: "magnifyingglass", value: TVTab.search, role: .search) { TVSearchView() }
+        }
+        // Dark mode = TRUE BLACK (OLED), not the system's dark gray; light mode stays system.
+        .background {
+            if colorScheme == .dark {
+                Color.black.ignoresSafeArea()
+            }
         }
         // Starting playback anywhere jumps straight to Now Playing.
         .environment(\.tvOpenNowPlaying) { tab = .nowPlaying }
