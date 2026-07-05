@@ -380,8 +380,9 @@ final class SessionHub {
         let command = data["Command"] as? String
 
 #if os(tvOS)
-        // The direct Music Videos playlist runs its own AVPlayer — route transport there.
-        if TVVideoController.shared.direct {
+        // A video (direct playlist OR a song's matched music video) runs its own AVPlayer —
+        // route transport there.
+        if TVVideoController.shared.ownsPlayback {
             TVVideoController.shared.handleRemote(command ?? "")
             return
         }

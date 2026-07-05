@@ -170,6 +170,21 @@ final class Player {
     func pause() { if isPlaying { togglePlayPause() } }
     func resume() { if !isPlaying, queue.currentItem != nil { togglePlayPause() } }
 
+    /// Silence this player WITHOUT touching the queue or track identity — used on tvOS when a
+    /// matched music video takes over as the playback (the video's own audio is the sound).
+    /// Unlike `pause()`, this also drops the play INTENT, so a track still buffering won't start
+    /// sounding when it becomes ready.
+    func yieldToExternalPlayback() {
+        intendedPlaying = false
+        player?.pause()
+        if isPlaying {
+            isPlaying = false
+            reportProgress(paused: true)
+            updateNowPlayingRate()
+            saveSession()
+        }
+    }
+
     /// Jump to an existing item in the current queue (e.g. tapping in the Up Next list).
     func play(at index: Int) {
         guard queue.items.indices.contains(index) else { return }
@@ -218,10 +233,6 @@ final class Player {
         seekSuppressUntil = Date().addingTimeInterval(0.5)
         updateNowPlayingElapsed()
         saveSession()
-#if os(tvOS)
-        // A matched music-video backdrop follows the song's clock — snap it to the new position.
-        TVVideoController.shared.audioDidSeek(to: clamped)
-#endif
     }
 
     func nextTrack() {

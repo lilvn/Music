@@ -24,19 +24,25 @@ struct MusicTVApp: App {
                 .task {
                     AudioStore.shared.attach(client)
                     SessionHub.shared.start(client: client, player: player)
-                    if client.isAuthenticated { await TVVideoController.shared.loadLibrary(client: client) }
+                    if client.isAuthenticated {
+                        await TVVideoController.shared.loadLibrary(client: client)
+                        // The restored (or already-started) track may have a matched video — the
+                        // library wasn't loaded yet when it appeared, so evaluate once now.
+                        TVVideoController.shared.evaluate(client: client, audio: player)
+                    }
                 }
                 .onChange(of: client.userId) { _, newUserId in
                     player.userDidChange(to: newUserId)
                     SessionHub.shared.restart()
                 }
-                // Track changed → re-match the (muted) video backdrop to the new song, or clear it.
+                // Track changed → hand playback to the new song's matched video, or back to audio.
                 .onChange(of: player.currentItem?.id) { _, _ in
                     TVVideoController.shared.evaluate(client: client, audio: player)
                 }
-                // Play/pause the audio → freeze/resume the muted backdrop with it.
-                .onChange(of: player.isPlaying) { _, playing in
-                    TVVideoController.shared.setPlaying(playing)
+                // Audio play-state changed → while a matched video owns playback the audio must
+                // stay silent; a stray resume (Siri, remote command) is folded into the video.
+                .onChange(of: player.isPlaying) { _, _ in
+                    TVVideoController.shared.audioPlayStateChanged(audio: player)
                 }
         }
     }

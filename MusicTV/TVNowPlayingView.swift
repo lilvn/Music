@@ -36,9 +36,11 @@ struct TVNowPlayingView: View {
                     Color.clear
                 } else if SessionHub.shared.yieldedToRemote, let remote = SessionHub.shared.remote {
                     remoteMirror(remote)
-                } else if let remote = SessionHub.shared.remote, !remote.isPaused, !player.isPlaying {
+                } else if let remote = SessionHub.shared.remote, !remote.isPaused,
+                          !player.isPlaying, !videoCtl.matched {
                     // Another device is ACTIVELY playing and we're not — its live playback outranks
-                    // the locally-restored (paused) track.
+                    // the locally-restored (paused) track. (A matched music video IS us playing,
+                    // even though the audio Player underneath sits silent.)
                     remoteMirror(remote)
                 } else if player.currentItem != nil {
                     // The centrepiece: centred for plain audio; docks bottom-left when a music video
@@ -226,7 +228,10 @@ struct TVPlaybackBar: View {
 
     var body: some View {
         let direct = videoCtl.direct
-        let playing = direct ? !videoCtl.directPaused : player.isPlaying
+        // Whenever a video owns playback (direct playlist OR the song's matched music video), the
+        // transport drives the VIDEO — the audio Player sits silent underneath a matched track.
+        let owns = videoCtl.ownsPlayback
+        let playing = owns ? !videoCtl.directPaused : player.isPlaying
         let item = direct ? videoCtl.activeVideo : player.currentItem
 
         ZStack {
@@ -246,7 +251,7 @@ struct TVPlaybackBar: View {
                         else { player.previousTrack() }
                     }
                     controlButton(.play, playing ? "pause.fill" : "play.fill") {
-                        direct ? videoCtl.togglePlayPause() : player.togglePlayPause()
+                        owns ? videoCtl.togglePlayPause() : player.togglePlayPause()
                     }
                     controlButton(.next, "forward.fill") {
                         if direct { videoCtl.skipDirect(+1, client: client, audio: player) }
@@ -272,7 +277,7 @@ struct TVPlaybackBar: View {
         .background(alignment: .leading) {
             if let item {
                 GeometryReader { g in
-                    let frac: Double = direct
+                    let frac: Double = owns
                         ? videoCtl.directProgress
                         : (player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0)
                     TVBarFill(item: item)
@@ -316,7 +321,8 @@ struct TVPlaybackBar: View {
     }
 
     private func enterScrub() {
-        guard !videoCtl.direct, player.duration > 0 else { return }
+        // No scrub while a video owns playback — its AVPlayer isn't the audio Player's timeline.
+        guard !videoCtl.ownsPlayback, player.duration > 0 else { return }
         scrubbing = true
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(60))   // let the catcher join the hierarchy
@@ -391,6 +397,10 @@ struct TVCompactNowPlaying: View {
         if videoCtl.direct, let video = videoCtl.activeVideo {
             return Model(item: video, sub: video.primaryArtist, spinning: !videoCtl.directPaused, remote: nil)
         }
+        // A matched music video owns playback: the SONG stays the identity, the video drives state.
+        if videoCtl.matched, let item = player.currentItem {
+            return Model(item: item, sub: item.primaryArtist, spinning: !videoCtl.directPaused, remote: nil)
+        }
         if let r = SessionHub.shared.remote, !r.isPaused, !player.isPlaying {
             return Model(item: r.item, sub: r.item.primaryArtist, spinning: true, remote: r)
         }
@@ -409,7 +419,7 @@ struct TVCompactNowPlaying: View {
             return min(max(r.livePosition(at: date) / dur, 0), 1)
         }
         let ctl = TVVideoController.shared
-        if ctl.direct { return ctl.directProgress }
+        if ctl.ownsPlayback { return ctl.directProgress }
         return player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0
     }
 
