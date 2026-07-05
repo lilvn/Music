@@ -18,21 +18,20 @@ struct TVSpinningDisc: View {
     static let pullOutRatio: CGFloat = 0.3
     static let spinSpeed: Double = 48   // degrees / second
 
-    /// Model-side rotation target; a long linear animation carries the presentation.
+    /// Model-side rotation target; a repeating one-revolution animation carries the presentation.
     @State private var rotation: Double = 0
     /// When the current spin segment started (nil while stopped) — lets a stop freeze the disc at
-    /// its CURRENT presented angle instead of snapping to the far-future target.
+    /// its CURRENT presented angle instead of snapping to the settled target.
     @State private var spinStart: Date?
     /// Bumped on every start/stop so a deferred start can tell it's been superseded.
     @State private var spinEpoch = 0
 
-    /// One "segment" spins for a day — effectively forever, at exactly spinSpeed.
-    private static let segment: Double = 86_400
-
     private var artURL: URL? { client.artworkURL(for: item, size: 400) }
 
     var body: some View {
-        // A plain long linear animation (no TimelineView — that froze on real hardware).
+        // One-revolution repeatForever cycles (NOT a single day-long animation: huge durations
+        // quantize the interpolator's float steps into visible judder; NOT TimelineView either —
+        // that froze outright on real hardware).
         disc
             .rotationEffect(.degrees(rotation))
             .onAppear { if spinning { start() } }
@@ -49,8 +48,8 @@ struct TVSpinningDisc: View {
             try? await Task.sleep(for: .milliseconds(50))
             guard epoch == spinEpoch, spinStart == nil else { return }
             spinStart = Date()
-            withAnimation(.linear(duration: Self.segment)) {
-                rotation += Self.spinSpeed * Self.segment
+            withAnimation(.linear(duration: 360 / Self.spinSpeed).repeatForever(autoreverses: false)) {
+                rotation += 360
             }
         }
     }
@@ -59,9 +58,9 @@ struct TVSpinningDisc: View {
         spinEpoch += 1
         guard let started = spinStart else { return }
         spinStart = nil
-        // Freeze exactly where the disc IS: rewind the model to the presented angle, no animation.
-        let presented = rotation - Self.spinSpeed * Self.segment
-            + Self.spinSpeed * Date().timeIntervalSince(started)
+        // Freeze exactly where the disc IS: the model settled at +360, the presentation loops from
+        // the old base — rewind to base plus the elapsed spin, no animation.
+        let presented = rotation - 360 + Self.spinSpeed * Date().timeIntervalSince(started)
         var t = Transaction()
         t.disablesAnimations = true
         withTransaction(t) { rotation = presented.truncatingRemainder(dividingBy: 360) }

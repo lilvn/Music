@@ -93,8 +93,10 @@ struct TVNowPlayingView: View {
         .onDisappear { pane = nil; barIdle?.cancel() }   // leaving the tab closes any open pane
         .onAppear { bumpBar() }
         // HIGHLIGHTING Lyrics/Up Next opens the pane (no click); landing back on the transport
-        // closes it. Any focus movement counts as interaction.
+        // closes it. Focus movement counts as interaction — but focus LEAVING the bar (f == nil,
+        // e.g. the idle-hide itself ejecting it) must not, or the bar could never rest.
         .onChange(of: barFocus) { _, f in
+            guard f != nil else { return }
             bumpBar()
             switch f {
             case .lyrics: pane = .lyrics
@@ -105,22 +107,14 @@ struct TVNowPlayingView: View {
         }
         .onChange(of: pane) { _, _ in bumpBar() }
         .onChange(of: player.isPlaying) { _, _ in bumpBar() }
-        // While the bar is hidden (or in direct video mode) the page itself catches the remote:
-        // any swipe brings the bar back / skips direct videos; click brings it back too.
-        .focusable(videoCtl.direct || !barVisible)
-        .onMoveCommand { direction in
-            guard barVisible else { bumpBar(focusTransport: true); return }
-            guard videoCtl.direct else { return }
-            switch direction {
-            case .left:  videoCtl.skipDirect(-1, client: client, audio: player)
-            case .right: videoCtl.skipDirect(+1, client: client, audio: player)
-            // The catcher consumes every move while it has focus — hand vertical swipes
-            // to the transport so the bar is actually reachable during a direct video.
-            case .down, .up: barFocus = .play
-            default: break
+        // The remote catcher exists ONLY while the chrome is hidden or a direct video plays.
+        // It must never sit on the page container itself: a move-command handler on an ANCESTOR
+        // of the focused button intercepts every swipe, making the transport unnavigable.
+        .overlay {
+            if videoCtl.direct || !barVisible {
+                remoteCatcher
             }
         }
-        .onTapGesture { if !barVisible { bumpBar(focusTransport: true) } }
         .background {
             ZStack {
                 // System theme like the browse pages — the only non-system background here is a
@@ -138,17 +132,38 @@ struct TVNowPlayingView: View {
         // this view — the video keeps playing while you browse; this view just renders the state.
     }
 
+    /// Invisible focus catcher: wakes hidden chrome on any input, and drives direct-video skipping.
+    /// Inserted only while it's needed so it can't shadow normal transport navigation.
+    private var remoteCatcher: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .focusable()
+            .onMoveCommand { direction in
+                guard barVisible else { bumpBar(focusTransport: true); return }
+                // Direct video with the bar up: left/right skip videos; a vertical swipe hands
+                // focus to the transport (the catcher itself consumes every move it receives).
+                switch direction {
+                case .left:  videoCtl.skipDirect(-1, client: client, audio: player)
+                case .right: videoCtl.skipDirect(+1, client: client, audio: player)
+                case .down, .up: barFocus = .play
+                default: break
+                }
+            }
+            .onTapGesture { if !barVisible { bumpBar(focusTransport: true) } }
+    }
+
     /// Show the bar and restart the idle countdown (never hides while a pane is open — its buttons
     /// are the way out).
     private func bumpBar(focusTransport: Bool = false) {
         let wasHidden = !barVisible
         barVisible = true
         // Waking from idle: the catcher held focus and is about to stop being focusable, which
-        // ejects focus somewhere arbitrary — land it ON the transport once the bar is inserted.
+        // ejects focus somewhere arbitrary — land it ON play once the bar is inserted (unconditional:
+        // the engine sometimes grabs the lyrics button first, surprise-opening the pane).
         if focusTransport, wasHidden {
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(150))
-                if barFocus == nil { barFocus = .play }
+                barFocus = .play
             }
         }
         barIdle?.cancel()
