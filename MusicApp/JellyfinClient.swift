@@ -214,15 +214,21 @@ final class JellyfinClient {
     }
 
     func fetchPlaylists() async throws -> [MediaItem] {
-        try await fetchItems(path: "Users/\(userId)/Items", query: [
+        let items = try await fetchItems(path: "Users/\(userId)/Items", query: [
             q("IncludeItemTypes", "Playlist"),
             q("Recursive", "true"),
             q("SortBy", "SortName"),
             q("Limit", "200"),
-            q("Fields", "ChildCount,Overview"),
+            q("Fields", "ChildCount,Overview,CanDelete"),
             q("ImageTypeLimit", "1"),
             q("EnableImageTypes", "Primary"),
         ])
+        // OWNED ONLY: Jellyfin can surface another user's playlist to this account — an OpenAccess
+        // (share-with-everyone) or shared playlist — and that leaks their content into the Playlists
+        // tab (App Store rejection cause). `CanDelete` is true only for playlists this user owns
+        // (for a non-admin, you can only delete your own), so it's the owner signal. A playlist
+        // with canDelete nil/false belongs to someone else and is dropped.
+        return items.filter { $0.canDelete == true }
     }
 
     /// Items of a playlist, preserving the playlist's own order.
@@ -313,14 +319,17 @@ final class JellyfinClient {
     }
 
     func search(query: String) async throws -> [MediaItem] {
-        try await fetchItems(path: "Users/\(userId)/Items", query: [
+        let items = try await fetchItems(path: "Users/\(userId)/Items", query: [
             q("SearchTerm", query),
             q("IncludeItemTypes", "Audio,MusicAlbum,MusicArtist,Playlist"),
             q("Recursive", "true"),
             q("Limit", "60"),
-            q("Fields", "PrimaryImageAspectRatio,SortName,AlbumArtist,Album,RunTimeTicks,AlbumId"),
+            q("Fields", "PrimaryImageAspectRatio,SortName,AlbumArtist,Album,RunTimeTicks,AlbumId,CanDelete"),
             q("ImageTypeLimit", "1"),
         ])
+        // Same owner guard as fetchPlaylists: a foreign OpenAccess/shared playlist must not surface
+        // in search either. Non-playlist results are untouched.
+        return items.filter { $0.type != "Playlist" || $0.canDelete == true }
     }
 
     func fetchLyrics(itemId: String) async throws -> [LyricLine] {

@@ -21,6 +21,11 @@ struct MediaItem: Identifiable, Codable, Hashable {
     let childCount: Int?
     let overview: String?
     let playlistItemId: String?   // entry id when this item lives inside a playlist
+    /// Whether the CURRENT user may delete this item. For a playlist on a non-admin account this is
+    /// true only for playlists they OWN — used as the owner signal to keep other users' playlists
+    /// (e.g. an OpenAccess/shared one) out of the Playlists tab. `var` + default so the manual
+    /// MediaItem constructions don't have to pass it. Only populated when requested in `Fields`.
+    var canDelete: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case id = "Id", name = "Name", type = "Type"
@@ -38,6 +43,7 @@ struct MediaItem: Identifiable, Codable, Hashable {
         case childCount = "ChildCount"
         case overview = "Overview"
         case playlistItemId = "PlaylistItemId"
+        case canDelete = "CanDelete"
     }
 
     var durationSeconds: Double? {
