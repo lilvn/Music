@@ -124,7 +124,7 @@ struct MacHomeView: View {
         .task {
             guard !loaded else { return }
             async let feat = client.fetchFeatured(limit: 10)
-            async let rec = client.fetchRecentlyAdded(limit: 14)
+            async let rec = client.fetchNewReleases(limit: 14)
             async let most = client.fetchMostPlayed(limit: 14)
             async let lists = client.fetchPlaylists()
             featured = (try? await feat) ?? []

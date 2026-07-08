@@ -60,7 +60,7 @@ struct HomeView: View {
 
     private func load(force: Bool = false) async {
         guard force || !loaded else { return }
-        async let recent = client.fetchRecentlyAdded(limit: 14)
+        async let recent = client.fetchNewReleases(limit: 14)
         async let feat = client.fetchFeatured(limit: 8)
         async let most = client.fetchMostPlayed(limit: 16)
         async let arts = client.fetchArtists(limit: 30)

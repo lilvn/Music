@@ -147,7 +147,7 @@ struct TVHomeView: View {
             .task {
                 guard !loaded else { return }
                 async let feat = client.fetchFeatured(limit: 8)
-                async let recent = client.fetchRecentlyAdded(limit: 12)
+                async let recent = client.fetchNewReleases(limit: 12)
                 async let most = client.fetchMostPlayed(limit: 12)
                 async let lists = client.fetchPlaylists()
                 async let arts = client.fetchArtists(limit: 24)

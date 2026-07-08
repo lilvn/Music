@@ -118,14 +118,17 @@ final class JellyfinClient {
 
     // MARK: - Library
 
-    func fetchRecentlyAdded(limit: Int = 16) async throws -> [MediaItem] {
+    /// "New Releases" — albums by their actual RELEASE date (PremiereDate), newest first, NOT by
+    /// when they were imported into the library (DateCreated). ProductionYear is the tiebreaker so an
+    /// album tagged with a year but no exact premiere date still ranks among that year's releases.
+    func fetchNewReleases(limit: Int = 16) async throws -> [MediaItem] {
         try await fetchItems(path: "Users/\(userId)/Items", query: [
             q("IncludeItemTypes", "MusicAlbum"),
-            q("SortBy", "DateCreated"),
+            q("SortBy", "ProductionYear,PremiereDate"),
             q("SortOrder", "Descending"),
             q("Limit", "\(limit)"),
             q("Recursive", "true"),
-            q("Fields", "PrimaryImageAspectRatio,ProductionYear,ChildCount,Overview"),
+            q("Fields", "PrimaryImageAspectRatio,ProductionYear,PremiereDate,ChildCount,Overview"),
             q("ImageTypeLimit", "1"),
             q("EnableImageTypes", "Primary"),
         ])
