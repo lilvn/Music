@@ -141,7 +141,9 @@ final class JellyfinClient {
             q("SortBy", "Random"),
             q("Limit", "\(limit)"),
             q("Recursive", "true"),
-            q("Fields", "PrimaryImageAspectRatio,ProductionYear,ChildCount,Overview,AlbumArtist"),
+            // AlbumArtists (not just the AlbumArtist name string) carries the artist id the Featured
+            // context menu's "Go to Artist" needs.
+            q("Fields", "PrimaryImageAspectRatio,ProductionYear,ChildCount,Overview,AlbumArtist,AlbumArtists"),
             q("ImageTypeLimit", "1"),
             q("EnableImageTypes", "Primary"),
         ])

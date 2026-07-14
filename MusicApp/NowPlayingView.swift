@@ -159,20 +159,8 @@ struct NowPlayingView: View {
     private var trackInfo: some View {
         // Title/artist on the left, like button on the right edge.
         HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(player.currentItem?.name ?? "Not Playing")
-                    .font(.title2).fontWeight(.bold)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(player.currentItem?.primaryArtist ?? "")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            // 3D-touch (long-press) the title/artist for Go to Album / Artist.
-            .contextMenu {
+            // TAP the title/artist to open the menu (no 3D-touch/long-press needed).
+            Menu {
                 Button { navigate(.album(albumItem)) } label: { Label("Go to Album", systemImage: "square.stack") }
                 if let artistRoute {
                     Button { navigate(artistRoute) } label: { Label("Go to Artist", systemImage: "music.mic") }
@@ -182,7 +170,22 @@ struct NowPlayingView: View {
                         Label("Add to Playlist", systemImage: "text.badge.plus")
                     }
                 }
+            } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(player.currentItem?.name ?? "Not Playing")
+                        .font(.title2).fontWeight(.bold)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(player.currentItem?.primaryArtist ?? "")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .tint(.primary)   // keep the title/artist their own colours, not the accent tint
 
             addButton
         }

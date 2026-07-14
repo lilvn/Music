@@ -528,7 +528,7 @@ struct SongRow: View {
                 Task { await client.setFavorite(song.id, !liked) }
             } label: {
                 Label(client.favoriteIds.contains(song.id) ? "Unlike" : "Add to Liked Songs",
-                      systemImage: client.favoriteIds.contains(song.id) ? "heart.slash" : "heart")
+                      systemImage: client.favoriteIds.contains(song.id) ? "heart.slash" : "plus")
             }
             if let onAddToPlaylist {
                 Button { onAddToPlaylist() } label: { Label("Add to Playlist", systemImage: "text.badge.plus") }
