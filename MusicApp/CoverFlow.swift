@@ -102,12 +102,10 @@ struct ReflectedCover: View {
                 .artworkShadow()   // lift the upright cover off the page
                 .contentShape(Rectangle())
                 .onTapGesture { if isCurrent { push(.album(album)) } else { playAlbum() } }
-                // 3D-touch a Featured cover → open its album page (Go to Album), or jump to the artist.
-                .contextMenu {
-                    Button { push(.album(album)) } label: { Label("Go to Album", systemImage: "square.stack") }
-                    if let a = album.albumArtists?.first ?? album.artistItems?.first {
-                        Button { push(.artist(artistItem(a))) } label: { Label("Go to Artist", systemImage: "music.mic") }
-                    }
+                // 3D-touch (long-press) a Featured cover → open its album detail directly (no menu).
+                .onLongPressGesture(minimumDuration: 0.4) {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    push(.album(album))
                 }
         }
         .frame(width: size, height: size)
@@ -162,15 +160,6 @@ struct ReflectedCover: View {
             let tracks = (try? await client.fetchAlbumTracks(albumId: album.id)) ?? []
             if !tracks.isEmpty { player.play(items: tracks, from: 0) }
         }
-    }
-
-    /// A minimal artist item for navigation; ArtistDetailView fetches full metadata by id.
-    private func artistItem(_ a: NameId) -> MediaItem {
-        MediaItem(id: a.id, name: a.name, type: "MusicArtist",
-                  sortName: nil, albumArtist: nil, albumArtists: nil, album: nil, albumId: nil,
-                  artistItems: nil, indexNumber: nil, parentIndexNumber: nil, runTimeTicks: nil,
-                  productionYear: nil, imageTags: nil, albumPrimaryImageTag: nil, childCount: nil,
-                  overview: nil, playlistItemId: nil)
     }
 
     @ViewBuilder
