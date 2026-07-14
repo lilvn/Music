@@ -58,6 +58,9 @@ struct MiniPlayer: View {
                     .disabled(!player.canGoNext)
                     .opacity(player.canGoNext ? 1 : 0.3)
             }
+            // During a scrub the whole bar is the scrubber — stop the transport buttons from
+            // catching the drag as a tap (an accidental skip / play-pause).
+            .allowsHitTesting(!scrubbing)
         }
         .foregroundStyle(.primary)
         // A circle only reads as centred inside the capsule's semicircular end cap when its leading gap
