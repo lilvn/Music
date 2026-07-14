@@ -33,6 +33,9 @@ struct RootTabView: View {
                 SearchView()
             }
         }
+        // Apple-Music-style: scrolling DOWN collapses the tab bar into a compact row and the mini-bar
+        // accessory rides down onto it; scrolling back up expands them again.
+        .tabBarMinimizeBehavior(.onScrollDown)
         // Liquid-Glass mini bar in the native iOS 26 bottom accessory — the system floats it correctly
         // ABOVE the floating tab bar (a plain safeAreaInset overlaps it) and supplies the glass. Shown
         // ONLY while a track is loaded, so there's no empty bar when idle.

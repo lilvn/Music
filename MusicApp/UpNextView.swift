@@ -7,7 +7,6 @@ import SwiftUI
 struct UpNextView: View {
     @Environment(Player.self) private var player
     @Environment(JellyfinClient.self) private var client
-    @Environment(\.dismiss) private var dismiss
     @Namespace private var highlightNS
 
     /// One entry in the unified list: a queue/Autoplay track, or the Autoplay toggle divider.
@@ -90,11 +89,7 @@ struct UpNextView: View {
                 }
                 .navigationTitle("Up Next")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { dismiss() }.fontWeight(.semibold)
-                    }
-                }
+                // No Done button — the sheet dismisses with the standard swipe-down.
             }   // ScrollViewReader
         }
         .presentationBackground {
