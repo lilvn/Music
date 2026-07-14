@@ -200,16 +200,21 @@ struct ReflectedCover: View {
     var scrubAnchorProgress: Double = 0
     var lastScrub: Double = 0
     var isScrubbing = false
+    /// The exact angle the disc LAST drew. The scrub anchors to this so it begins from precisely
+    /// what's on screen. (The old anchor re-derived the angle by folding `base` to a wall-clock
+    /// `Date()`, but the last drawn frame used the TimelineView's frame date — a different instant.
+    /// That mismatch is what made the CD skip to a different angle the moment a scrub began/ended.)
+    var lastRenderedAngle: Double = 0
 
     static let miniBar = DiscSpinState()
 
-    /// Freeze the current free-spin angle and anchor the scrub to `progress`. Call this SYNCHRONOUSLY the
-    /// instant a scrub begins (the mini bar does, from its gesture) so the disc's first scrubbed frame
-    /// reads a correct anchor instead of a stale one — that stale read is what made the CD jump on touch.
-    func beginScrub(progress: Double, now: Date) {
+    /// Anchor the scrub to the angle currently on screen. Idempotent, so the gesture can call it
+    /// synchronously and a later render-time call is a no-op.
+    func beginScrub(progress: Double) {
         guard !isScrubbing else { return }                       // already anchored for this scrub
-        if let r = ref { base += now.timeIntervalSince(r) * SpinningDisc.spinSpeed; ref = nil }
-        scrubAnchorAngle = base
+        base = lastRenderedAngle                                 // free spin resumes from here on release
+        ref = nil
+        scrubAnchorAngle = lastRenderedAngle
         scrubAnchorProgress = progress
         lastScrub = progress
         isScrubbing = true
@@ -256,31 +261,36 @@ struct SpinningDisc: View {
     private var freeSpinning: Bool { spinning && scrubProgress == nil }
 
     private func angle(at date: Date) -> Double {
+        let result: Double
         if let p = scrubProgress {
-            // Self-anchor on the FIRST scrubbed evaluation. Cover-flow discs use per-view spin state
-            // that no gesture can anchor synchronously (only the mini bar's gesture anchors .miniBar),
-            // so their first scrubbed frame — and, with the timeline paused during a stationary hold,
-            // the ENTIRE hold — rendered a stale anchor: the Featured CD's visible jump. beginScrub is
-            // idempotent (guard !isScrubbing), so the mini bar's synchronous anchor stays authoritative,
-            // and folding at the render-time `date` makes the first scrubbed angle exactly equal the
-            // disc's current free-spin angle: zero jump. (DiscSpinState is a plain non-observed class,
-            // so mutating it during render is safe — no invalidation loop.)
-            if !s.isScrubbing { s.beginScrub(progress: p, now: date) }
-            s.lastScrub = p   // keep the fold target current for the lazy end below
-            return s.scrubAnchorAngle + (p - s.scrubAnchorProgress) * Self.scrubTurns
+            // Self-anchor on the FIRST scrubbed evaluation (idempotent, so the mini bar's synchronous
+            // gesture anchor stays authoritative). Anchoring to `lastRenderedAngle` makes the first
+            // scrubbed frame EXACTLY equal what the disc last drew — zero jump. (DiscSpinState is a
+            // plain non-observed class, so mutating it during render is safe — no invalidation loop.)
+            if !s.isScrubbing { s.beginScrub(progress: p) }
+            s.lastScrub = p   // keep the fold target current for the end fold
+            result = s.scrubAnchorAngle + (p - s.scrubAnchorProgress) * Self.scrubTurns
+        } else if s.isScrubbing {
+            // scrubProgress is nil while a scrub is still active on the shared state. For .miniBar that
+            // means either a neighbour strip (shares the state, off-screen) or the current strip in the
+            // one frame before onChange folds the scrub — HOLD the last drawn angle so nothing snaps to
+            // a stale base. Cover-flow discs use per-view state that no gesture folds, so they must end
+            // the scrub at render time instead.
+            if s === DiscSpinState.miniBar {
+                result = s.lastRenderedAngle
+            } else {
+                s.endScrub()
+                if spinning, s.ref == nil { s.ref = date }   // reopen the free spin from the landed angle
+                if spinning, let ref = s.ref { result = s.base + date.timeIntervalSince(ref) * Self.spinSpeed }
+                else { result = s.base }
+            }
+        } else if spinning, let ref = s.ref {
+            result = s.base + date.timeIntervalSince(ref) * Self.spinSpeed
+        } else {
+            result = s.base
         }
-        // The scrub just ended but onChange hasn't folded yet — end it NOW, at render time, or this
-        // frame reads the stale pre-scrub base (the one-frame flicker on release). NOT for .miniBar:
-        // its neighbour strips share the state and render with a nil scrubProgress DURING a scrub,
-        // which would end it out from under the strip being scrubbed.
-        if s !== DiscSpinState.miniBar, s.isScrubbing {
-            s.endScrub()
-            if spinning, s.ref == nil { s.ref = date }   // reopen the free spin from the landed angle
-        }
-        if spinning, let ref = s.ref {
-            return s.base + date.timeIntervalSince(ref) * Self.spinSpeed
-        }
-        return s.base
+        s.lastRenderedAngle = result   // the scrub anchors to this exact value
+        return result
     }
 
     /// Open or close the free-spin segment to match the current state, folding any elapsed rotation
@@ -305,7 +315,7 @@ struct SpinningDisc: View {
         .onChange(of: scrubProgress) { old, new in
             let now = Date()
             if old == nil, new != nil {            // scrub began (idempotent — the mini bar anchors first)
-                s.beginScrub(progress: new ?? 0, now: now)
+                s.beginScrub(progress: new ?? 0)
             } else if old != nil, new == nil {     // scrub ended — resume the spin from where it landed
                 s.endScrub()
                 reconcile(now)

@@ -163,7 +163,7 @@ struct MiniPlayer: View {
                         scrubWasPlaying = player.isPlaying
                         // Anchor the CD's scrub rotation to its current angle synchronously, BEFORE the
                         // first scrubbed frame renders — otherwise it reads a stale anchor and jumps.
-                        DiscSpinState.miniBar.beginScrub(progress: progress, now: Date())
+                        DiscSpinState.miniBar.beginScrub(progress: progress)
                         player.beginScrubbing()
                     }
                     if let drag {
