@@ -265,8 +265,11 @@ struct SpinningDisc: View {
     // time. Scrubbing and pausing set the angle directly. No TimelineView means no per-frame redraw,
     // which is the whole energy win.
     @State private var rotation: Double = 0
-    /// Bumped whenever the spin is (re)started or stopped, so a deferred spin start can tell it's stale.
-    @State private var spinToken = 0
+    /// Supersedes a pending deferred spin start when the state changes again first.
+    @State private var spinEpoch = 0
+    /// A plain value change does NOT stop a `.repeatForever` animation — bumping this recreates the
+    /// disc's render subtree via `.id`, which hard-kills the running rotation. (Same fix as tvOS.)
+    @State private var freezeGeneration = 0
     @State private var localSpin = DiscSpinState()
     private var s: DiscSpinState { persistentSpin ?? localSpin }
 
@@ -275,54 +278,63 @@ struct SpinningDisc: View {
     var body: some View {
         disc
             .rotationEffect(.degrees(rotation))
-            .onAppear { apply() }
-            .onChange(of: freeSpinning) { _, _ in apply() }
-            .onChange(of: animating) { _, _ in apply() }
+            .id(freezeGeneration)
+            .onAppear { sync(hardStop: true) }
+            .onChange(of: freeSpinning) { _, _ in sync(hardStop: true) }
+            .onChange(of: animating) { _, _ in sync(hardStop: true) }
             .onChange(of: scrubProgress) { old, new in
                 let now = Date()
+                let boundary = (old == nil) != (new == nil)   // scrub just started or just ended
                 if old == nil, new != nil { s.beginScrub(progress: new ?? 0, now: now) }
                 if let new { s.lastScrub = new }
                 if old != nil, new == nil { s.endScrub() }
-                apply()
+                // Kill/restart the spin only at the scrub boundaries — recreating the subtree on every
+                // drag frame would thrash (and no animation is running mid-scrub anyway).
+                sync(hardStop: boundary)
             }
     }
 
-    /// Point `rotation` where it belongs for the current state, and (re)start the GPU spin when free.
-    private func apply() {
+    /// Bring the presented rotation (and any running spin) in line with the current state. `hardStop`
+    /// recreates the subtree to kill a running `.repeatForever`.
+    private func sync(hardStop: Bool) {
         let now = Date()
+        spinEpoch += 1                          // supersede any pending deferred start
         if let p = scrubProgress {
             // Scrubbing: the angle follows the finger, set directly (no animation).
             if !s.isScrubbing { s.beginScrub(progress: p, now: now) }
             s.lastScrub = p
-            freezeRotation(s.scrubAnchorAngle + (p - s.scrubAnchorProgress) * Self.scrubTurns)
+            setAngle(s.scrubAnchorAngle + (p - s.scrubAnchorProgress) * Self.scrubTurns, killCA: hardStop)
         } else if freeSpinning && animating {
             // Land at the current visible angle, then hand a single repeating rotation to Core Animation.
             let cur = s.angle(now)
             s.base = cur; s.ref = now
-            freezeRotation(cur)                 // commit the angle (also cancels any prior spin)
-            spinToken += 1
-            let token = spinToken
-            // Deferred a tick so the freeze above commits first — otherwise SwiftUI coalesces the two
-            // and the spin animates from the OLD angle (a big sweep on first appear).
+            setAngle(cur, killCA: true)         // freeze at cur, killing any prior spin
+            let epoch = spinEpoch
+            // Deferred a tick so the freeze/kill commits first — otherwise SwiftUI coalesces them and
+            // the spin sweeps from the OLD angle.
             Task { @MainActor in
-                guard token == spinToken, scrubProgress == nil, freeSpinning, animating else { return }
+                try? await Task.sleep(for: .milliseconds(30))
+                guard epoch == spinEpoch, scrubProgress == nil, freeSpinning, animating else { return }
                 withAnimation(.linear(duration: 360 / Self.spinSpeed).repeatForever(autoreverses: false)) {
                     rotation = cur + 360
                 }
             }
         } else {
             // Paused, or an off-screen neighbour: freeze at the current angle. Only an on-screen disc
-            // folds the SHARED segment (a hidden neighbour must not disturb the spin others are showing).
-            spinToken += 1                      // supersede any pending/running spin
+            // folds the SHARED segment (a hidden neighbour must not disturb the spin others show).
             if animating { s.freeze(now) }
-            freezeRotation(s.angle(now))
+            setAngle(s.angle(now), killCA: true)
         }
     }
 
-    /// Set the presented angle with no implicit animation — this also cancels an in-flight spin.
-    private func freezeRotation(_ value: Double) {
+    /// Set the presented angle with no implicit animation, optionally recreating the subtree to kill a
+    /// running `.repeatForever` (a bare value set won't stop one).
+    private func setAngle(_ value: Double, killCA: Bool) {
         var t = Transaction(); t.disablesAnimations = true
-        withTransaction(t) { rotation = value }
+        withTransaction(t) {
+            rotation = value
+            if killCA { freezeGeneration += 1 }
+        }
     }
 
     private var disc: some View {
