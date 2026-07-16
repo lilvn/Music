@@ -18,7 +18,6 @@ struct MiniPlayer: View {
     private var minimized: Bool { accessoryPlacement == .inline }
 
     @State private var width: CGFloat = 1
-    @State private var barHeight: CGFloat = 56
     @State private var scrubbing = false
     @State private var scrubStart: Double = 0
     @State private var dragProgress: Double = 0
@@ -73,10 +72,12 @@ struct MiniPlayer: View {
             .allowsHitTesting(!scrubbing)
         }
         .foregroundStyle(.primary)
-        // A circle only reads as centred inside the capsule's semicircular end cap when its leading gap
-        // equals its vertical gap — (H − 40)/2 — so the 40pt CD sits concentric with the cap's arc. The
-        // old uniform 12pt pushed it visibly right. Controls keep the 12pt trailing inset.
-        .padding(.leading, max(4, (barHeight - 40) / 2))
+        // Leading inset centres the 40pt CD in the capsule's semicircular end cap: (H − 40)/2, i.e. 8
+        // in the 56pt expanded bar, ~4 in the shorter collapsed row. Driven by the DISCRETE placement,
+        // NOT a GeometryReader-measured height — measuring the height while the bar animates its resize
+        // formed a measure→setState→re-animate feedback loop that made the CD lag and drift before
+        // settling. A discrete value just springs cleanly from 8 to 4.
+        .padding(.leading, minimized ? 4 : 8)
         .padding(.trailing, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Progress fill = the dynamic artwork gradient, toned toward the system background, revealed
@@ -94,7 +95,7 @@ struct MiniPlayer: View {
                 }
                 .allowsHitTesting(false)
         }
-        .background { GeometryReader { g in Color.clear.onChange(of: g.size, initial: true) { _, s in width = s.width; barHeight = s.height } } }
+        .background { GeometryReader { g in Color.clear.onChange(of: g.size.width, initial: true) { _, w in width = w } } }
         // The tabViewBottomAccessory supplies the Liquid Glass; we only clip our own progress fill.
         .clipShape(Capsule())
         .contentShape(Capsule())
@@ -126,9 +127,9 @@ struct MiniPlayer: View {
             }
             Spacer(minLength: 0)
         }
-        // Reserve room for the controls on the right. Minimized shows only play/pause, so the title
-        // reclaims the space the prev/next buttons used to take.
-        .padding(.trailing, minimized ? 52 : 104)
+        // Reserve room for the controls on the right. Minimized shows only play/pause (~46pt with its
+        // inset), so the title reclaims the rest of what the prev/next buttons used to take.
+        .padding(.trailing, minimized ? 46 : 104)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -155,13 +156,15 @@ struct MiniPlayer: View {
         return result
     }
 
-    /// Opaque over the CD + title, fading to clear under the controls on the right. The clear zone
-    /// shrinks when minimized (only play/pause to clear), so the title fades later and shows more.
+    /// Opaque over the CD + title, fading to clear under the controls on the right. When minimized the
+    /// clear zone shrinks to just the play/pause button and the fade shortens, so the title stays
+    /// crisp much closer to the button and shows more.
     private var stripsMask: some View {
         HStack(spacing: 0) {
             Rectangle().fill(.black)
-            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 26)
-            Color.clear.frame(width: minimized ? 46 : 100)
+            LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: minimized ? 16 : 26)
+            Color.clear.frame(width: minimized ? 44 : 100)
         }
     }
 
