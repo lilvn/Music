@@ -126,7 +126,9 @@ struct MiniPlayer: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.trailing, 104)   // keep the title clear of the controls
+        // Reserve room for the controls on the right. Minimized shows only play/pause, so the title
+        // reclaims the space the prev/next buttons used to take.
+        .padding(.trailing, minimized ? 52 : 104)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -153,12 +155,13 @@ struct MiniPlayer: View {
         return result
     }
 
-    /// Opaque over the CD + title, fading to clear under the controls on the right.
+    /// Opaque over the CD + title, fading to clear under the controls on the right. The clear zone
+    /// shrinks when minimized (only play/pause to clear), so the title fades later and shows more.
     private var stripsMask: some View {
         HStack(spacing: 0) {
             Rectangle().fill(.black)
             LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 26)
-            Color.clear.frame(width: 100)
+            Color.clear.frame(width: minimized ? 46 : 100)
         }
     }
 
