@@ -194,36 +194,45 @@ struct ReflectedCover: View {
 /// view is re-created each switch, which would otherwise reset per-view `@State` back to angle 0). The
 /// cover flow keeps its own per-view instance.
 @MainActor final class DiscSpinState {
-    var base: Double = 0
-    var ref: Date? = nil
+    var base: Double = 0        // angle at the start of the current free-spin segment, or the frozen angle
+    var ref: Date? = nil        // when that segment started; nil = not currently free-spinning
     var scrubAnchorAngle: Double = 0
     var scrubAnchorProgress: Double = 0
     var lastScrub: Double = 0
     var isScrubbing = false
-    /// The exact angle the disc LAST drew. The scrub anchors to this so it begins from precisely
-    /// what's on screen. (The old anchor re-derived the angle by folding `base` to a wall-clock
-    /// `Date()`, but the last drawn frame used the TimelineView's frame date — a different instant.
-    /// That mismatch is what made the CD skip to a different angle the moment a scrub began/ended.)
-    var lastRenderedAngle: Double = 0
 
     static let miniBar = DiscSpinState()
 
-    /// Anchor the scrub to the angle currently on screen. Idempotent, so the gesture can call it
-    /// synchronously and a later render-time call is a no-op.
-    func beginScrub(progress: Double) {
-        guard !isScrubbing else { return }                       // already anchored for this scrub
-        base = lastRenderedAngle                                 // free spin resumes from here on release
-        ref = nil
-        scrubAnchorAngle = lastRenderedAngle
+    /// The angle on screen right now. The free spin is a plain LINEAR Core Animation started from `base`
+    /// at `ref`, so this analytical value matches the presentation exactly — anchoring a scrub to it
+    /// can't skip. (The old wall-clock-vs-frame-clock mismatch that made the CD jump is gone.)
+    func angle(_ now: Date) -> Double {
+        if isScrubbing { return scrubAnchorAngle + (lastScrub - scrubAnchorProgress) * SpinningDisc.scrubTurns }
+        if let ref { return base + now.timeIntervalSince(ref) * SpinningDisc.spinSpeed }
+        return base
+    }
+
+    /// Fold elapsed spin into `base` and close the segment, so `angle` stays continuous across it.
+    func freeze(_ now: Date) {
+        if let r = ref { base += now.timeIntervalSince(r) * SpinningDisc.spinSpeed; ref = nil }
+    }
+
+    /// Anchor a scrub to the angle on screen. Idempotent — the gesture calls it synchronously and a
+    /// later reactive call is a no-op.
+    func beginScrub(progress: Double, now: Date) {
+        guard !isScrubbing else { return }
+        freeze(now)                                              // free spin resumes from here on release
+        scrubAnchorAngle = base
         scrubAnchorProgress = progress
         lastScrub = progress
         isScrubbing = true
     }
 
-    /// Fold the scrubbed rotation back into the base so the free spin resumes from where it landed.
+    /// Fold the scrubbed rotation back into `base` so the free spin resumes from where it landed.
     func endScrub() {
         guard isScrubbing else { return }
         base = scrubAnchorAngle + (lastScrub - scrubAnchorProgress) * SpinningDisc.scrubTurns
+        ref = nil
         isScrubbing = false
     }
 }
@@ -251,77 +260,69 @@ struct SpinningDisc: View {
     static let spinSpeed: Double = 48             // degrees / second
     static let scrubTurns: Double = 540           // degrees across the full scrub range
 
-    // Free spin is a pure function of (spinBase, spinRef): angle = spinBase + elapsed·speed, but only
-    // while a segment is open (spinRef != nil). Stopping the spin or starting a scrub folds the elapsed
-    // rotation into spinBase and closes the segment, so the visible angle never jumps — and the result
-    // is independent of onChange ordering (the earlier cause of the disc "jumping randomly").
+    // The presented rotation. The free spin is ONE repeating Core Animation — the GPU turns the
+    // (once-rendered) disc layer while the CPU stays idle and the artwork blur is composited a single
+    // time. Scrubbing and pausing set the angle directly. No TimelineView means no per-frame redraw,
+    // which is the whole energy win.
+    @State private var rotation: Double = 0
+    /// Bumped whenever the spin is (re)started or stopped, so a deferred spin start can tell it's stale.
+    @State private var spinToken = 0
     @State private var localSpin = DiscSpinState()
     private var s: DiscSpinState { persistentSpin ?? localSpin }
 
     private var freeSpinning: Bool { spinning && scrubProgress == nil }
 
-    private func angle(at date: Date) -> Double {
-        let result: Double
-        if let p = scrubProgress {
-            // Self-anchor on the FIRST scrubbed evaluation (idempotent, so the mini bar's synchronous
-            // gesture anchor stays authoritative). Anchoring to `lastRenderedAngle` makes the first
-            // scrubbed frame EXACTLY equal what the disc last drew — zero jump. (DiscSpinState is a
-            // plain non-observed class, so mutating it during render is safe — no invalidation loop.)
-            if !s.isScrubbing { s.beginScrub(progress: p) }
-            s.lastScrub = p   // keep the fold target current for the end fold
-            result = s.scrubAnchorAngle + (p - s.scrubAnchorProgress) * Self.scrubTurns
-        } else if s.isScrubbing {
-            // scrubProgress is nil while a scrub is still active on the shared state. For .miniBar that
-            // means either a neighbour strip (shares the state, off-screen) or the current strip in the
-            // one frame before onChange folds the scrub — HOLD the last drawn angle so nothing snaps to
-            // a stale base. Cover-flow discs use per-view state that no gesture folds, so they must end
-            // the scrub at render time instead.
-            if s === DiscSpinState.miniBar {
-                result = s.lastRenderedAngle
-            } else {
-                s.endScrub()
-                if spinning, s.ref == nil { s.ref = date }   // reopen the free spin from the landed angle
-                if spinning, let ref = s.ref { result = s.base + date.timeIntervalSince(ref) * Self.spinSpeed }
-                else { result = s.base }
-            }
-        } else if spinning, let ref = s.ref {
-            result = s.base + date.timeIntervalSince(ref) * Self.spinSpeed
-        } else {
-            result = s.base
-        }
-        s.lastRenderedAngle = result   // the scrub anchors to this exact value
-        return result
-    }
-
-    /// Open or close the free-spin segment to match the current state, folding any elapsed rotation
-    /// into `s.base` so the displayed angle is continuous across the transition.
-    private func reconcile(_ now: Date) {
-        if freeSpinning, s.ref == nil {
-            s.ref = now
-        } else if !freeSpinning, let ref = s.ref {
-            s.base += now.timeIntervalSince(ref) * Self.spinSpeed
-            s.ref = nil
-        }
-    }
-
     var body: some View {
-        TimelineView(.animation(paused: !freeSpinning || !animating)) { context in
-            disc.rotationEffect(.degrees(angle(at: context.date)))
-        }
-        // Don't let spin (play/pause) reconciles reopen the free-spin segment mid-scrub — the scrub owns
-        // the angle until it ends. (Matters when several strips share `.miniBar`.)
-        .onAppear { if !s.isScrubbing { reconcile(Date()) } }
-        .onChange(of: spinning) { _, _ in if !s.isScrubbing { reconcile(Date()) } }
-        .onChange(of: scrubProgress) { old, new in
-            let now = Date()
-            if old == nil, new != nil {            // scrub began (idempotent — the mini bar anchors first)
-                s.beginScrub(progress: new ?? 0)
-            } else if old != nil, new == nil {     // scrub ended — resume the spin from where it landed
-                s.endScrub()
-                reconcile(now)
+        disc
+            .rotationEffect(.degrees(rotation))
+            .onAppear { apply() }
+            .onChange(of: freeSpinning) { _, _ in apply() }
+            .onChange(of: animating) { _, _ in apply() }
+            .onChange(of: scrubProgress) { old, new in
+                let now = Date()
+                if old == nil, new != nil { s.beginScrub(progress: new ?? 0, now: now) }
+                if let new { s.lastScrub = new }
+                if old != nil, new == nil { s.endScrub() }
+                apply()
             }
-            if let new { s.lastScrub = new }
+    }
+
+    /// Point `rotation` where it belongs for the current state, and (re)start the GPU spin when free.
+    private func apply() {
+        let now = Date()
+        if let p = scrubProgress {
+            // Scrubbing: the angle follows the finger, set directly (no animation).
+            if !s.isScrubbing { s.beginScrub(progress: p, now: now) }
+            s.lastScrub = p
+            freezeRotation(s.scrubAnchorAngle + (p - s.scrubAnchorProgress) * Self.scrubTurns)
+        } else if freeSpinning && animating {
+            // Land at the current visible angle, then hand a single repeating rotation to Core Animation.
+            let cur = s.angle(now)
+            s.base = cur; s.ref = now
+            freezeRotation(cur)                 // commit the angle (also cancels any prior spin)
+            spinToken += 1
+            let token = spinToken
+            // Deferred a tick so the freeze above commits first — otherwise SwiftUI coalesces the two
+            // and the spin animates from the OLD angle (a big sweep on first appear).
+            Task { @MainActor in
+                guard token == spinToken, scrubProgress == nil, freeSpinning, animating else { return }
+                withAnimation(.linear(duration: 360 / Self.spinSpeed).repeatForever(autoreverses: false)) {
+                    rotation = cur + 360
+                }
+            }
+        } else {
+            // Paused, or an off-screen neighbour: freeze at the current angle. Only an on-screen disc
+            // folds the SHARED segment (a hidden neighbour must not disturb the spin others are showing).
+            spinToken += 1                      // supersede any pending/running spin
+            if animating { s.freeze(now) }
+            freezeRotation(s.angle(now))
         }
+    }
+
+    /// Set the presented angle with no implicit animation — this also cancels an in-flight spin.
+    private func freezeRotation(_ value: Double) {
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) { rotation = value }
     }
 
     private var disc: some View {
