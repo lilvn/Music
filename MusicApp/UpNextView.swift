@@ -7,7 +7,6 @@ import SwiftUI
 struct UpNextView: View {
     @Environment(Player.self) private var player
     @Environment(JellyfinClient.self) private var client
-    @Namespace private var highlightNS
 
     /// One entry in the unified list: a queue/Autoplay track, or the Autoplay toggle divider.
     private enum Entry: Identifiable {
@@ -180,16 +179,7 @@ struct UpNextView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        // "Magnifier" selector that glides between rows. A SOLID fill (no material/blur): the live
-        // waveform redraws this row ~30fps, and a backdrop-blur highlight re-blurred the already-blurred
-        // sheet background every one of those frames — the main cause of the sluggish framerate here.
-        .background {
-            if isCurrent {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.primary.opacity(0.12))
-                    .matchedGeometryEffect(id: "upnextHighlight", in: highlightNS)
-            }
-        }
+        // No highlight on the playing row — the waveform playing-indicator already marks it.
     }
 
     /// A glass shuffle/repeat toggle. Its own `bump` state fires haptic feedback on EVERY tap — the
