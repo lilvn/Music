@@ -112,53 +112,16 @@ struct ArtworkBackground: View {
     let url: URL?
     var animated: Bool = true
     var body: some View {
-        Group {
-            if animated {
-                // Now Playing: an audio-reactive metaball lava lamp coloured by the art (GPU shader).
-                LavaLampBackground(url: url)
-            } else {
-                ArtworkGradient(url: url, blur: 38, animated: false)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
-        .overlay(Color(.systemBackground).opacity(0.42))
-        .overlay(
-            LinearGradient(colors: [Color(.systemBackground).opacity(0.25),
-                                    Color(.systemBackground).opacity(0.0),
-                                    Color(.systemBackground).opacity(0.55)],
-                           startPoint: .top, endPoint: .bottom))
-        .ignoresSafeArea()
-    }
-}
-
-/// The full "lava lamp": the blurred album art (the colour source) run through the `lavaLamp` Metal
-/// shader — churning, audio-swelling metaball blobs. One GPU shader pass per frame (~30 fps); the CPU
-/// only feeds it the elapsed time and the live audio level.
-struct LavaLampBackground: View {
-    let url: URL?
-    @Environment(Player.self) private var player
-    /// Elapsed time is passed to the shader (not absolute time — a huge Float loses precision and the
-    /// blobs would quantise/jitter).
-    @State private var start = Date()
-
-    var body: some View {
-        GeometryReader { geo in
-            let size = geo.size
-            // ~30 fps: the audio level itself only updates at 30 Hz, and a lava lamp doesn't need 120.
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-                let t = Float(context.date.timeIntervalSince(start))
-                let level = Float(min(1, max(0, player.audioLevel)))
-                ArtworkGradient(url: url, blur: 38, animated: false)
-                    .frame(width: size.width, height: size.height)
-                    .layerEffect(
-                        ShaderLibrary.lavaLamp(
-                            .float2(Float(size.width), Float(size.height)),
-                            .float(t),
-                            .float(level)),
-                        maxSampleOffset: CGSize(width: size.width * 0.12, height: size.height * 0.12))
-            }
-        }
+        ArtworkGradient(url: url, blur: 38, animated: animated)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+            .overlay(Color(.systemBackground).opacity(0.5))
+            .overlay(
+                LinearGradient(colors: [Color(.systemBackground).opacity(0.25),
+                                        Color(.systemBackground).opacity(0.0),
+                                        Color(.systemBackground).opacity(0.55)],
+                               startPoint: .top, endPoint: .bottom))
+            .ignoresSafeArea()
     }
 }
 
