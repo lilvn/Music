@@ -12,6 +12,10 @@ struct MiniPlayer: View {
     var appColorScheme: ColorScheme = .light
     @Environment(Player.self) private var player
     @Environment(JellyfinClient.self) private var client
+    /// `.inline` when the tab bar has collapsed and the mini bar is sharing that row; `.expanded`
+    /// when it's the full-width bar. Drives which controls fit.
+    @Environment(\.tabViewBottomAccessoryPlacement) private var accessoryPlacement
+    private var minimized: Bool { accessoryPlacement == .inline }
 
     @State private var width: CGFloat = 1
     @State private var barHeight: CGFloat = 56
@@ -49,14 +53,20 @@ struct MiniPlayer: View {
             }
             .mask(stripsMask)
 
-            // Controls — fixed on the right, above the sliding strips.
+            // Controls — fixed on the right, above the sliding strips. When minimized into the tab-bar
+            // row there's only room for one control, so show just play/pause; prev/next return when the
+            // bar expands back to full width.
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
-                control("backward.fill") { skip(forward: false) }
+                if !minimized {
+                    control("backward.fill") { skip(forward: false) }
+                }
                 playPause
-                control("forward.fill") { skip(forward: true) }
-                    .disabled(!player.canGoNext)
-                    .opacity(player.canGoNext ? 1 : 0.3)
+                if !minimized {
+                    control("forward.fill") { skip(forward: true) }
+                        .disabled(!player.canGoNext)
+                        .opacity(player.canGoNext ? 1 : 0.3)
+                }
             }
             // During a scrub the whole bar is the scrubber — stop the transport buttons from
             // catching the drag as a tap (an accidental skip / play-pause).
