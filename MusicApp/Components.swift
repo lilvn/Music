@@ -493,25 +493,10 @@ struct SongRow: View {
         }
         .padding(.horizontal, DS.hPad)
         .frame(minHeight: large ? 68 : 56)
-        // Liquid-glass "magnifier" highlight on the currently-playing row (consistent across all lists).
-        .background {
-            if isCurrent {
-                if let ns = highlightNamespace {
-                    Color.clear
-                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
-                        .padding(.horizontal, 8)
-                        .matchedGeometryEffect(id: "songHighlight", in: ns)
-                } else {
-                    Color.clear
-                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
-                        .padding(.horizontal, 8)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                }
-            }
-        }
-        // Animate the highlight HERE, scoped to the row — NOT page-wide on `player.currentItem`. A
-        // page-level animation on a navigation destination leaks into the nav bar and makes the back
-        // button slide/disappear when the track changes while the page is on screen.
+        // No background highlight on the currently-playing row — the waveform playing-indicator (in the
+        // leading thumbnail) already signifies it. (`highlightNamespace` is now inert.)
+        // Row-scoped so the title's weight change still eases; NOT page-wide on player.currentItem,
+        // which would leak into the nav bar and disturb the back button on a track change.
         .animation(.spring(response: 0.4, dampingFraction: 0.82), value: isCurrent)
         .contentShape(Rectangle())
         .onTapGesture { onTap() }
