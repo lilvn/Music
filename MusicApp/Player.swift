@@ -637,7 +637,10 @@ final class Player {
         activateAudioSession()
 
         queue.currentIndex = index
-        currentTime = 0
+        // Start the progress at the saved position when resuming a restored session (pendingSeekTime
+        // is set just before this), so the bar stays put instead of dropping to 0 and sliding back once
+        // the item loads and seeks. A fresh track (no pending seek) starts at 0 as normal.
+        currentTime = pendingSeekTime ?? 0
         // Seed from the track's metadata so the lock-screen length/scrubber appear immediately; the
         // decoded duration refines it once the item is ready.
         duration = queue.items[index].durationSeconds ?? 0
