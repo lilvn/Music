@@ -119,9 +119,7 @@ struct MiniPlayer: View {
                          spinning: cdOut,
                          scrubProgress: current && scrubbing ? dragProgress : nil,
                          persistentSpin: .miniBar,
-                         // Freeze the spin while the bar is compact/compacting: a live rotation fights
-                         // the tab-bar collapse morph and glitches. Off-screen neighbours don't spin either.
-                         animating: (current || dragX != 0) && !minimized)
+                         animating: current || dragX != 0)   // off-screen neighbours don't run a spin
                 .frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.name).font(.subheadline).fontWeight(.semibold).lineLimit(1)
