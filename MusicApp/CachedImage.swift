@@ -19,6 +19,13 @@ final class ImageStore {
     private let cache = NSCache<NSString, PlatformImage>()
     private let loader = Loader()
 
+    // Per artwork (its base URL, size-independent), the key of the LARGEST rendition cached so far — a
+    // ready stand-in to show instantly while a different size loads (the detail cover requests 600 but
+    // the card you tapped cached e.g. 400: without this the detail flashes blank for a frame). Holds
+    // only tiny strings/floats, resolved through the NSCache (so an evicted image just yields nil).
+    private let baseLock = NSLock()
+    private var bestForBase: [String: (px: CGFloat, key: NSString)] = [:]
+
     private init() {
         cache.totalCostLimit = 120 * 1024 * 1024   // ~120 MB of decoded pixels
         cache.countLimit = 500                      // and a hard cap on object count
@@ -30,7 +37,28 @@ final class ImageStore {
         "\(url.absoluteString)#\(Int(maxPixel))" as NSString
     }
 
+    /// The artwork's identity, independent of the requested size (the size lives in the query).
+    private func base(_ url: URL) -> String {
+        var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        comps?.query = nil
+        return comps?.string ?? url.absoluteString
+    }
+
+    private func remember(_ url: URL, _ maxPixel: CGFloat, _ k: NSString) {
+        let b = base(url)
+        baseLock.lock()
+        if let cur = bestForBase[b], cur.px >= maxPixel {} else { bestForBase[b] = (maxPixel, k) }
+        baseLock.unlock()
+    }
+
     func cached(_ url: URL, maxPixel: CGFloat) -> PlatformImage? { cache.object(forKey: key(url, maxPixel)) }
+
+    /// Any already-decoded rendition of this artwork at ANY size (the largest cached), for an instant
+    /// stand-in while the exact size decodes. Returns nil if nothing's cached (or it was evicted).
+    func cachedAnySize(_ url: URL) -> PlatformImage? {
+        baseLock.lock(); let k = bestForBase[base(url)]?.key; baseLock.unlock()
+        return k.flatMap { cache.object(forKey: $0) }
+    }
 
     /// Warm the cache for a batch of artwork up front, so shelves/grids show their art immediately
     /// instead of popping in as cells scroll into view. Work is off-main, downsampled, and `.utility`
@@ -59,6 +87,7 @@ final class ImageStore {
                 let cost = Int(img.size.width * img.size.height * 4)   // decoded RGBA estimate
 #endif
                 cache.setObject(img, forKey: k, cost: cost)
+                ImageStore.shared.remember(url, maxPixel, k)   // index as a stand-in for other sizes
             }
             return img
         }
@@ -134,8 +163,12 @@ struct LibraryImage<Placeholder: View>: View {
         self.maxPixel = maxPixel
         self.contentMode = contentMode
         self.placeholder = placeholder()
-        // Show a cached image immediately (no placeholder flash, no decode on appear).
-        _image = State(initialValue: url.flatMap { ImageStore.shared.cached($0, maxPixel: maxPixel) })
+        // Show a cached image immediately (no placeholder flash). Exact size if we have it, else any
+        // cached rendition of the same artwork as a stand-in (e.g. the card's smaller image when opening
+        // a detail cover) so it never flashes blank.
+        _image = State(initialValue: url.flatMap {
+            ImageStore.shared.cached($0, maxPixel: maxPixel) ?? ImageStore.shared.cachedAnySize($0)
+        })
     }
 
     var body: some View {
@@ -156,9 +189,11 @@ struct LibraryImage<Placeholder: View>: View {
         .task(id: url) {
             guard let url else { image = nil; return }
             if let cached = ImageStore.shared.cached(url, maxPixel: maxPixel) { image = cached; return }
-            image = nil
+            // No exact-size hit: show any cached rendition of this artwork as an instant stand-in (keeps
+            // the cover from flashing blank), then upgrade to the crisp requested size when it's ready.
+            image = ImageStore.shared.cachedAnySize(url)
             let loaded = await ImageStore.shared.load(url, maxPixel: maxPixel)
-            if !Task.isCancelled { image = loaded }
+            if !Task.isCancelled, let loaded { image = loaded }
         }
     }
 }
