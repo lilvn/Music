@@ -239,6 +239,10 @@ private struct FadingDetailHeader<Trailing: View>: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // Once dismissal starts (back tap OR edge-swipe both set `closing`), stop the content taking
+            // taps — otherwise a tap during the zoom-out pop lands on a track row that's still animating
+            // away and plays it. `closing` is set synchronously in close(), before the pop runs.
+            .allowsHitTesting(!closing)
             .safeAreaInset(edge: .top, spacing: 0) { bar }   // a custom nav bar that reserves its own space
             .toolbar(.hidden, for: .navigationBar)   // no system bar — we draw our own, so opacity animates
             // `.toolbar(.hidden)` alone doesn't suppress the system back button when the parent stack is
