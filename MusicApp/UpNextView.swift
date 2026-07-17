@@ -92,10 +92,21 @@ struct UpNextView: View {
             }   // ScrollViewReader
         }
         .presentationBackground {
-            // Static (animated: false): a drifting gradient behind the list forces a costly per-frame
-            // re-blur and drops frames here. The track-to-track cross-fade still animates.
-            CrossfadeBackground(url: client.artworkURL(for: player.currentItem ?? .placeholder, size: 400),
-                                animated: false)
+            // A SOLID sheet background with only a faint art tint fading out over the top — so the
+            // reorderable list scrolls over an opaque surface instead of a full-bleed blur the system
+            // has to composite every frame. (The reorder machinery is the bigger cost; this trims the
+            // background's share of it.)
+            ZStack(alignment: .top) {
+                Color(.systemBackground)
+                ArtworkGradient(url: client.artworkURL(for: player.currentItem ?? .placeholder, size: 400),
+                                blur: 50, animated: false)
+                    .frame(height: 240)
+                    .opacity(0.4)
+                    .mask(LinearGradient(colors: [.black, .black.opacity(0)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .ignoresSafeArea(edges: .top)
+            }
+            .ignoresSafeArea()
         }
     }
 
