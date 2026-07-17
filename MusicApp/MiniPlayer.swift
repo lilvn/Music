@@ -30,6 +30,12 @@ struct MiniPlayer: View {
     @State private var dragX: CGFloat = 0
     /// A commit slide is in flight — locks out new drags/skips until it lands.
     @State private var paging = false
+    /// True for the ~0.35s the tab bar spends morphing between full and compact. The CD freezes while
+    /// this is set: iOS crossfades a FROZEN snapshot of the bar against the live one during the morph,
+    /// and a live-spinning CD desyncs from its snapshot → the flicker. Freezing only for the morph keeps
+    /// the CD spinning in the settled compact pill.
+    @State private var morphing = false
+    @State private var morphResetTask: Task<Void, Never>?
 
     private var progress: Double {
         player.duration > 0 ? min(max(player.currentTime / player.duration, 0), 1) : 0
@@ -107,6 +113,15 @@ struct MiniPlayer: View {
         .sensoryFeedback(.selection, trigger: tick)
         // Lock the bar to the app's TRUE theme (the glass accessory's local appearance can flip).
         .environment(\.colorScheme, appColorScheme)
+        // Freeze the CD for the duration of the compact/expand morph, then let it spin again.
+        .onChange(of: minimized) { _, _ in
+            morphing = true
+            morphResetTask?.cancel()
+            morphResetTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(450))
+                if !Task.isCancelled { morphing = false }
+            }
+        }
     }
 
     /// One now-playing strip: the spinning CD + title for a track. Both current and neighbour share the
@@ -119,7 +134,9 @@ struct MiniPlayer: View {
                          spinning: cdOut,
                          scrubProgress: current && scrubbing ? dragProgress : nil,
                          persistentSpin: .miniBar,
-                         animating: current || dragX != 0)   // off-screen neighbours don't run a spin
+                         // Freeze through the compact/expand morph (not the settled states); off-screen
+                         // neighbours don't spin either.
+                         animating: (current || dragX != 0) && !morphing)
                 .frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.name).font(.subheadline).fontWeight(.semibold).lineLimit(1)
