@@ -10,6 +10,7 @@ struct HomeView: View {
     @State private var featured: [MediaItem] = []
     @State private var mostPlayed: [MediaItem] = []
     @State private var artists: [MediaItem] = []
+    @State private var playlists: [MediaItem] = []
     @State private var loaded = false
     @State private var showSettings = false
 
@@ -18,18 +19,23 @@ struct HomeView: View {
             GeometryReader { geo in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 30) {
-                        CoverFlowShelf(title: "Featured",
-                                       albums: featured,
+                        // The skeuomorphic cover-flow carousel is now New Releases; Featured is the
+                        // horizontal card row below it.
+                        CoverFlowShelf(title: "New Releases",
+                                       albums: recentlyAdded,
                                        topInset: geo.safeAreaInsets.top)
 
-                        if !recentlyAdded.isEmpty {
-                            FeaturedShelf(title: "New Releases", albums: recentlyAdded)
+                        if !featured.isEmpty {
+                            FeaturedShelf(title: "Featured", albums: featured)
                         }
                         if !player.recentManualPlays.isEmpty {
                             RecentlyPlayedShelf(plays: player.recentManualPlays)
                         }
                         if !mostPlayed.isEmpty {
                             MostPlayedShelf(tracks: mostPlayed)
+                        }
+                        if !playlists.isEmpty {
+                            PlaylistsShelf(playlists: playlists)
                         }
                         if !artists.isEmpty {
                             ArtistsShelf(artists: artists)
@@ -64,18 +70,22 @@ struct HomeView: View {
         async let feat = client.fetchFeatured(limit: 8)
         async let most = client.fetchMostPlayed(limit: 16)
         async let arts = client.fetchArtists(limit: 30)
+        async let lists = client.fetchPlaylists()
         recentlyAdded = (try? await recent) ?? recentlyAdded
         featured = (try? await feat) ?? featured
         mostPlayed = (try? await most) ?? mostPlayed
         artists = (try? await arts) ?? artists
+        playlists = (try? await lists) ?? playlists
         loaded = true
 
         // Warm each shelf's artwork at the size it actually renders, so nothing pops in as you scroll.
+        // New Releases is now the 600px cover-flow; Featured is the 400px card row.
         let store = ImageStore.shared
-        store.prefetch(recentlyAdded.map { client.artworkURL(for: $0, size: 400) }, maxPixel: 400)
-        store.prefetch(featured.map { client.artworkURL(for: $0, size: 600) }, maxPixel: 600)
+        store.prefetch(recentlyAdded.map { client.artworkURL(for: $0, size: 600) }, maxPixel: 600)
+        store.prefetch(featured.map { client.artworkURL(for: $0, size: 400) }, maxPixel: 400)
         store.prefetch(mostPlayed.map { client.artworkURL(for: $0, size: 400) }, maxPixel: 400)
-        store.prefetch(artists.map { client.artworkURL(for: $0, size: 200) }, maxPixel: 280)
+        store.prefetch(playlists.map { client.artworkURL(for: $0, size: 400) }, maxPixel: 400)
+        store.prefetch(artists.map { client.artworkURL(for: $0, size: 240) }, maxPixel: 320)
         store.prefetch(player.recentManualPlays.map { client.artworkURL(for: $0.track, size: 400) }, maxPixel: 400)
     }
 }
@@ -172,29 +182,57 @@ struct ArtistsShelf: View {
                     ForEach(artists) { artist in
                         LibraryLink(route: .artist(artist)) {
                             VStack(spacing: 8) {
-                                LibraryImage(url: client.artworkURL(for: artist, size: 200), maxPixel: 280) {
+                                LibraryImage(url: client.artworkURL(for: artist, size: 240), maxPixel: 320) {
                                     Color(.systemGray5)
                                         .overlay {
                                             Image(systemName: "person.fill")
-                                                .font(.title)
+                                                .font(.largeTitle)
                                                 .foregroundStyle(Color(.systemGray3))
                                         }
                                 }
-                                .frame(width: 92, height: 92)
+                                .frame(width: 128, height: 128)
                                 .clipShape(Circle())
-                                .shadow(color: .black.opacity(0.15), radius: 5, y: 3)
+                                .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
 
                                 Text(artist.name)
-                                    .font(.caption)
+                                    .font(.subheadline)
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
-                                    .frame(width: 96)
+                                    .frame(width: 132)
                             }
                         }
                     }
                 }
                 .padding(.horizontal, DS.hPad)
             }
+        }
+    }
+}
+
+// MARK: - Playlists shelf (horizontal covers)
+
+struct PlaylistsShelf: View {
+    let playlists: [MediaItem]
+    private let cardSize: CGFloat = 150
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Playlists")
+                .font(.largeTitle).fontWeight(.bold)
+                .padding(.horizontal, DS.hPad)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 14) {
+                    ForEach(playlists) { playlist in
+                        LibraryLink(route: .playlist(playlist)) {
+                            PlaylistCard(playlist: playlist)
+                                .frame(width: cardSize)
+                        }
+                    }
+                }
+                .padding(.horizontal, DS.hPad)
+            }
+            .scrollClipDisabled()   // don't clip the cards' drop shadow
         }
     }
 }
