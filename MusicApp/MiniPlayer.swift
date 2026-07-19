@@ -218,8 +218,10 @@ struct MiniPlayer: View {
 
     /// Drag the now-playing strip horizontally to page tracks (left → next, right → previous). A
     /// deliberate hold-then-drag is a scrub instead (`didScrubThisDrag` suppresses paging then).
+    /// Engages only PAST the scrub long-press's 22pt tolerance, so a small wobble while holding to
+    /// scrub doesn't page the strip out from under the scrub (the two gestures no longer overlap).
     private var pageGesture: some Gesture {
-        DragGesture(minimumDistance: 12)
+        DragGesture(minimumDistance: 26)
             .onChanged { value in
                 guard !scrubbing, !didScrubThisDrag, !paging else { return }
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
