@@ -266,7 +266,7 @@ struct RecentlyPlayedShelf: View {
     /// Manual plays only (the user explicitly chose these) — not queue / Autoplay / auto-advance.
     let plays: [ManualPlay]
     @Environment(JellyfinClient.self) private var client
-    private let cardSize: CGFloat = 132
+    private let cardSize: CGFloat = 150
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -326,7 +326,7 @@ struct MostPlayedShelf: View {
     /// The user's most-played songs, already ordered most-played first.
     let tracks: [MediaItem]
     @Environment(JellyfinClient.self) private var client
-    private let cardSize: CGFloat = 132
+    private let cardSize: CGFloat = 150
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
