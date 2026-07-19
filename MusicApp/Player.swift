@@ -661,6 +661,11 @@ final class Player {
         }
 
         let qp = AVQueuePlayer(items: items)
+        // AirPlay these audio tracks as AUDIO, not video. With the default (true) the player hands the
+        // whole item to the Apple TV as an external VIDEO stream, and an audio-only item renders as a
+        // black screen; false keeps playback local and routes the sound through the audio session, so
+        // the Apple TV shows its own Now Playing screen with our artwork instead of black.
+        qp.allowsExternalPlayback = false
         // Let the player wait/buffer to avoid stalls — required so seeking to an unbuffered spot
         // (and gapless pre-roll of the next item) work reliably.
         qp.automaticallyWaitsToMinimizeStalling = true
