@@ -19,14 +19,12 @@ struct HomeView: View {
             GeometryReader { geo in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 30) {
-                        // The skeuomorphic cover-flow carousel is now New Releases; Featured is the
-                        // horizontal card row below it.
-                        CoverFlowShelf(title: "New Releases",
-                                       albums: recentlyAdded,
+                        CoverFlowShelf(title: "Featured",
+                                       albums: featured,
                                        topInset: geo.safeAreaInsets.top)
 
-                        if !featured.isEmpty {
-                            FeaturedShelf(title: "Featured", albums: featured)
+                        if !recentlyAdded.isEmpty {
+                            FeaturedShelf(title: "New Releases", albums: recentlyAdded)
                         }
                         if !player.recentManualPlays.isEmpty {
                             RecentlyPlayedShelf(plays: player.recentManualPlays)
@@ -79,10 +77,9 @@ struct HomeView: View {
         loaded = true
 
         // Warm each shelf's artwork at the size it actually renders, so nothing pops in as you scroll.
-        // New Releases is now the 600px cover-flow; Featured is the 400px card row.
         let store = ImageStore.shared
-        store.prefetch(recentlyAdded.map { client.artworkURL(for: $0, size: 600) }, maxPixel: 600)
-        store.prefetch(featured.map { client.artworkURL(for: $0, size: 400) }, maxPixel: 400)
+        store.prefetch(recentlyAdded.map { client.artworkURL(for: $0, size: 400) }, maxPixel: 400)
+        store.prefetch(featured.map { client.artworkURL(for: $0, size: 600) }, maxPixel: 600)
         store.prefetch(mostPlayed.map { client.artworkURL(for: $0, size: 400) }, maxPixel: 400)
         store.prefetch(playlists.map { client.artworkURL(for: $0, size: 400) }, maxPixel: 400)
         store.prefetch(artists.map { client.artworkURL(for: $0, size: 240) }, maxPixel: 320)
