@@ -653,10 +653,11 @@ struct SwipeQueuePlayButton: View {
         ZStack {
             // Queue hints revealed behind the pill as it slides aside.
             HStack {
-                Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                // Swipe RIGHT → Play Last; swipe LEFT → Play Next (directions swapped per request).
+                Image(systemName: "text.line.last.and.arrowtriangle.forward")
                     .opacity(dragX > 8 ? min(dragX / threshold, 1) : 0)
                 Spacer()
-                Image(systemName: "text.line.last.and.arrowtriangle.forward")
+                Image(systemName: "text.line.first.and.arrowtriangle.forward")
                     .opacity(dragX < -8 ? min(-dragX / threshold, 1) : 0)
             }
             .font(.system(size: 17, weight: .semibold))
@@ -699,8 +700,8 @@ struct SwipeQueuePlayButton: View {
             .onEnded { v in
                 let dx = v.translation.width
                 if didDrag, abs(dx) > abs(v.translation.height) * 1.2 {
-                    if dx > threshold { onPlayNext(); bump.toggle() }
-                    else if dx < -threshold { onPlayLast(); bump.toggle() }
+                    if dx > threshold { onPlayLast(); bump.toggle() }        // right → play last
+                    else if dx < -threshold { onPlayNext(); bump.toggle() }  // left → play next
                 }
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) { dragX = 0 }
                 Task { @MainActor in didDrag = false }   // clear AFTER any same-touch tap had its chance
